@@ -98,7 +98,9 @@ void Fifa19App::OnPostSetup() {
   // The pitch's shadow textures are made at match load by the CPU from GPU resolves, read once the guest's fence
   // is written: fences the command processor wrote at once (before the GPU had done the resolves) gave stale
   // bytes, so dark bands or a black pitch. The GPU writes them after the work before them.
-  rex::cvar::SetFlagByName("metal_gpu_fences", "true");
+  rex::cvar::SetDefaultValue("metal_gpu_fences", "true");
+  // The game draws 1280x720: MetalFX's spatial upscaler is sharper than bilinear on a larger window.
+  rex::cvar::SetDefaultValue("metal_present_upscale", "metalfx");
   Fifa19DevPadStart();
 }
 

@@ -48,9 +48,13 @@ scripts/play_mac.sh --fullscreen=false
 
 The first run shows the EA User Agreement and asks for a club; both are saved with the profile.
 
-The app sets `metal_gpu_fences=true`. FIFA builds the pitch's shadow textures on the CPU at match load, from GPU
-resolves, as soon as the guest's fence says they are done. Fences the command processor wrote at once came
-before the GPU had done those resolves, so the pitch got dark bands, or went black, depending on load timing.
+Defaults the app sets (each can still be changed in the config or on the command line):
+
+- `metal_gpu_fences=true`. FIFA builds the pitch's shadow textures on the CPU at match load, from GPU resolves,
+  as soon as the guest's fence says they are done. Fences the command processor wrote at once came before the
+  GPU had done those resolves, so the pitch got dark bands, or went black, depending on load timing.
+- `metal_present_upscale=metalfx`. The game draws 1280x720; MetalFX's spatial upscaler scales it to the
+  window, sharper than bilinear (`bilinear` to compare). SDR output only.
 
 ## Controls
 
@@ -124,6 +128,9 @@ resolves into `--metal_debug_dir`.
   - FIFA builds a 2048x2048 k_4_4_4_4 downsample chain level by level.
   - Before, each level dropped the texture and untiled 8 MB+ from memory: 31 ms of GPU a frame in a match,
     now 12 ms.
+- **Metal GPU fences:** written by the command processor at once when no resolve came before them (none of
+  FIFA's do; `metal_gpu_fences_all` writes every one on the GPU), and the per-frame stats line counts both.
+- **MetalFX spatial upscaling at present** (`metal_present_upscale`).
 - **Metal depth bias:** the polygon offset registers are applied, as the other backends do.
 - **Diagnostics:** an `XexLoadImage` result log, and register state on an invalid indirect call.
 - **Metal debug cvars:**
