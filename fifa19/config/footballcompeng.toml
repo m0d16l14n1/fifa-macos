@@ -1,0 +1,7 @@
+# Function boundary overrides for footballcompeng (filled in as codegen reports them).
+[functions]
+
+# Tail-call targets codegen reported as "target not in any function".
+[functions."0x880676AC"]
+name = "sub_880676AC"
+

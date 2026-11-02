@@ -1,0 +1,30 @@
+# Title screen to a Kick Off match (Cardiff City v Swansea City), for --fifa19_pad_script.
+# Assumes the EA User Agreement was accepted and the club picked on an earlier run (saved in the profile).
+wait 35s
+press start
+wait 25s
+# Main menu: Kick Off, side select, both teams, both kits, then Play Match.
+press a
+wait 10s
+press a
+wait 6s
+press a
+wait 4s
+press a
+wait 14s
+press a
+wait 3s
+press a
+wait 25s
+press a
+wait 8s
+# "We will dynamically adjust the difficulty" (first match only; harmless otherwise).
+press a
+wait 45s
+press start
+wait 20s
+# Skip the walk-out.
+press a
+wait 3s
+press a
+log kickoff script done

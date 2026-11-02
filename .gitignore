@@ -52,3 +52,7 @@ Desktop.ini
 __pycache__/
 *.pyc
 /FIFA-19
+
+# FIFA 19 macOS port: extracted game files and the local SDK copy
+/fifa19/game/
+/fifa19/third_party/

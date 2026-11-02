@@ -1,0 +1,30 @@
+# FIFA 19 (Xbox 360, title 454109F9) - ReXGlue recompiled project for macOS.
+# Module layout follows ReStreet (FIFA Street 2012), the same EA engine family.
+
+[project]
+name = "fifa19"
+sdk_version = "0.10.0"
+game_root = "game"
+
+[entrypoint]
+file_path = "game/default.xex"
+out_directory_path = "generated/default"
+includes = ["config/fifa19.toml"]
+
+[[modules]]
+guest_path = "game:\\CardsDLLzf.xex.dll"
+file_path = "game/CardsDLLzf.xex.dll"
+out_directory_path = "generated/CardsDLLzf_xex"
+includes = ["config/cardsdll.toml"]
+
+[[modules]]
+guest_path = "game:\\FootballCompEngzf.xex.dll"
+file_path = "game/dlc/dlc_FootballCompEng/dlc/FootballCompEng/FootballCompEngzf.xex.dll"
+out_directory_path = "generated/FootballCompEngzf_xex"
+includes = ["config/footballcompeng.toml"]
+
+[[modules]]
+guest_path = "game:\\powdllzf.xex.dll"
+file_path = "game/dlc/dlc_powdll/dlc/powdll/powdllzf.xex.dll"
+out_directory_path = "generated/powdllzf_xex"
+includes = ["config/powdll.toml"]
