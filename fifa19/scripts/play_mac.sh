@@ -29,7 +29,15 @@ done
 
 # The SDK's command line parser fails on a repeated option, so defaults are added only when not given.
 case " $* " in *" --log_level="*) ;; *) set -- --log_level=info "$@" ;; esac
-case " $* " in *" --log_file="*) ;; *) set -- --log_file=run.log "$@" ;; esac
+# The last run's log is kept in logs/ (ten of them), since each run starts run.log again.
+case " $* " in *" --log_file="*) ;; *)
+  set -- --log_file=run.log "$@"
+  if [ -f run.log ]; then
+    mkdir -p logs
+    mv run.log "logs/run-$(date -r run.log +%Y%m%d-%H%M%S).log"
+    ls -t logs/run-*.log | tail -n +11 | while read -r old; do rm -f "$old"; done
+  fi ;;
+esac
 if [ -n "$FIFA19_LLDB" ]; then
   exec lldb -o run -- ./fifa19 "$@"
 fi

@@ -44,7 +44,11 @@ scripts/play_mac.sh --fullscreen=false
 - `FIFA19_METAL_HUD=1` shows Apple's Metal performance HUD; `FIFA19_METAL_VALIDATION=1` turns on the Metal
   validation layer; `FIFA19_LLDB=1` runs under lldb.
 - `FIFA19_NATIVE_LIBC=0` turns off the native memcpy/memset/memmove.
-- The log goes to `out/build/mac-arm64-relwithdebinfo/run.log`.
+- The log goes to `out/build/mac-arm64-relwithdebinfo/run.log`; the ten runs before it are in `logs/` there.
+- A frame that took 250 ms or more leaves a "Metal hitch" line in the log (`metal_hitch_log_ms`). When the game
+  stops presenting for 2 s, every thread's stack goes into `stall-<time>.txt` next to the log
+  (`metal_stall_sample_ms`, from Apple's `sample`): send it along with the log.
+- `--fifa19_window_title=...` names the window (unattended test runs say so in theirs).
 
 The first run shows the EA User Agreement and asks for a club; both are saved with the profile.
 
@@ -55,6 +59,7 @@ Defaults the app sets (each can still be changed in the config or on the command
   GPU had done those resolves, so the pitch got dark bands, or went black, depending on load timing.
 - `metal_present_upscale=metalfx`. The game draws 1280x720; MetalFX's spatial upscaler scales it to the
   window, sharper than bilinear (`bilinear` to compare). SDR output only.
+- `metal_stall_sample_ms=2000`: see Running.
 
 ## Controls
 
@@ -131,6 +136,9 @@ resolves into `--metal_debug_dir`.
 - **Metal GPU fences:** written by the command processor at once when no resolve came before them (none of
   FIFA's do; `metal_gpu_fences_all` writes every one on the GPU), and the per-frame stats line counts both.
 - **MetalFX spatial upscaling at present** (`metal_present_upscale`).
+- **Stall reports:** a log line for each frame over `metal_hitch_log_ms` (250), and `/usr/bin/sample` of every
+  thread when no swap came for `metal_stall_sample_ms` (off in the SDK), from a watchdog thread.
+- **`metal_2x_as_1x`** (off): MSAA 2x surfaces drawn at one sample a pixel, as `metal_4x_as_1x` does for 4x.
 - **Metal depth bias:** the polygon offset registers are applied, as the other backends do.
 - **Diagnostics:** an `XexLoadImage` result log, and register state on an invalid indirect call.
 - **Metal debug cvars:**
@@ -138,6 +146,8 @@ resolves into `--metal_debug_dir`.
   - `metal_debug_dump_address=<addr>` dumps the next resolve into that address.
   - `metal_debug_texture_address=<addr>` logs the draws that bind a texture and dumps it, with its guest bytes.
   - `metal_debug_white_address=<addr>` binds white in its place.
+  - `metal_debug_profile` times each pass of a dumped frame in a command buffer of its own, each waiting for the
+    one before (overlapping, a pass's time took in the wait for its predecessor).
 
 ## Known issues
 

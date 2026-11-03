@@ -21,6 +21,10 @@ REXCVAR_DEFINE_STRING(fifa19_gpu_backend, "metal", "FIFA19",
                       "Graphics API of the xenos GPU plugin: metal, vulkan or any")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+// Unattended test runs name their window, so a player can tell them from a game they started.
+REXCVAR_DEFINE_STRING(fifa19_window_title, "FIFA 19", "FIFA19", "The window's title")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // The keyboard plays as pad one (merged with any real pad), laid out like FIFA's keyboard-only Classic controls on
 // PC: arrows move, W/A/S/D are through ball / lob / pass / shoot. These are defaults: the config file, the command
 // line and the settings overlay (F4) still change them. README.md lists them all.
@@ -101,9 +105,11 @@ void Fifa19App::OnPostSetup() {
   rex::cvar::SetDefaultValue("metal_gpu_fences", "true");
   // The game draws 1280x720: MetalFX's spatial upscaler is sharper than bilinear on a larger window.
   rex::cvar::SetDefaultValue("metal_present_upscale", "metalfx");
+  // A stall of 2 s leaves every thread's stack in stall-<time>.txt next to the log.
+  rex::cvar::SetDefaultValue("metal_stall_sample_ms", "2000");
   Fifa19DevPadStart();
 }
 
 void Fifa19App::OnCreateDialogs(rex::ui::ImGuiDrawer*) {
-  window()->SetTitle("FIFA 19");
+  window()->SetTitle(REXCVAR_GET(fifa19_window_title));
 }
