@@ -1,0 +1,1075 @@
+# Function boundary overrides for fifa19 (filled in as codegen reports them).
+[functions]
+
+# Pass 1: branch targets ReXGlue 0.10.0 analysis reported as "UnresolvedCall ... target not in any
+# function". Each is reached by a plain `b` from another function (a tail call into code no `bl` names).
+# sub_82329620 continues past an early blr (a second switch on r4 that loops back to 0x82329680);
+# the analyzer ended it at 0x8232969C, which left its tail and that loop label without an owner.
+[functions."0x82329620"]
+end = 0x823296E8
+
+[functions."0x8275ACA8"]
+name = "sub_8275ACA8"
+
+[functions."0x827D3AC8"]
+name = "sub_827D3AC8"
+
+[functions."0x827E08F0"]
+name = "sub_827E08F0"
+
+[functions."0x828110F8"]
+name = "sub_828110F8"
+
+[functions."0x82B5D6F0"]
+name = "sub_82B5D6F0"
+
+[functions."0x82C61F90"]
+name = "sub_82C61F90"
+
+[functions."0x83332698"]
+name = "sub_83332698"
+
+
+# Pass 2: code addresses stored in data (vtables, callback tables) that discovery never reached, each
+# right after another function's end (blr, b or padding): leaf functions and thunks the game only calls
+# through a pointer. Found with find_unregistered_targets.py on the decrypted image; an indirect call to
+# 0x83A172C8 aborted the first boot. Pointers into the middle of a function (exception-scope
+# continuations after `or r8,r8,r8`) are left out.
+[functions."0x823295A8"]
+name = "sub_823295A8"
+
+[functions."0x82365D50"]
+name = "sub_82365D50"
+
+[functions."0x82416C20"]
+name = "sub_82416C20"
+
+[functions."0x8241BC30"]
+name = "sub_8241BC30"
+
+[functions."0x825089E0"]
+name = "sub_825089E0"
+
+[functions."0x8258FA08"]
+name = "sub_8258FA08"
+
+[functions."0x8258FDD8"]
+name = "sub_8258FDD8"
+
+[functions."0x825C6978"]
+name = "sub_825C6978"
+
+[functions."0x82632530"]
+name = "sub_82632530"
+
+[functions."0x8263FAA8"]
+name = "sub_8263FAA8"
+
+[functions."0x8263FE50"]
+name = "sub_8263FE50"
+
+[functions."0x82681060"]
+name = "sub_82681060"
+
+[functions."0x826B37F0"]
+name = "sub_826B37F0"
+
+[functions."0x826B3830"]
+name = "sub_826B3830"
+
+[functions."0x826B3870"]
+name = "sub_826B3870"
+
+[functions."0x826B38B0"]
+name = "sub_826B38B0"
+
+[functions."0x826B38F0"]
+name = "sub_826B38F0"
+
+[functions."0x826B3930"]
+name = "sub_826B3930"
+
+[functions."0x826B3970"]
+name = "sub_826B3970"
+
+[functions."0x826B39B0"]
+name = "sub_826B39B0"
+
+[functions."0x826B39F0"]
+name = "sub_826B39F0"
+
+[functions."0x826B3A30"]
+name = "sub_826B3A30"
+
+[functions."0x826B3A70"]
+name = "sub_826B3A70"
+
+[functions."0x826B8778"]
+name = "sub_826B8778"
+
+[functions."0x826CF6A8"]
+name = "sub_826CF6A8"
+
+[functions."0x82776E10"]
+name = "sub_82776E10"
+
+[functions."0x82776E28"]
+name = "sub_82776E28"
+
+[functions."0x82778828"]
+name = "sub_82778828"
+
+[functions."0x82779AD8"]
+name = "sub_82779AD8"
+
+[functions."0x8277E578"]
+name = "sub_8277E578"
+
+[functions."0x827985D0"]
+name = "sub_827985D0"
+
+[functions."0x8279C9B8"]
+name = "sub_8279C9B8"
+
+[functions."0x827A1F08"]
+name = "sub_827A1F08"
+
+[functions."0x827B8B08"]
+name = "sub_827B8B08"
+
+[functions."0x827D3168"]
+name = "sub_827D3168"
+
+[functions."0x827D4570"]
+name = "sub_827D4570"
+
+[functions."0x827DC5B0"]
+name = "sub_827DC5B0"
+
+[functions."0x827DC5F0"]
+name = "sub_827DC5F0"
+
+[functions."0x827E0A08"]
+name = "sub_827E0A08"
+
+[functions."0x827E0A20"]
+name = "sub_827E0A20"
+
+[functions."0x828132B0"]
+name = "sub_828132B0"
+
+[functions."0x828132D0"]
+name = "sub_828132D0"
+
+[functions."0x828132F0"]
+name = "sub_828132F0"
+
+[functions."0x82813540"]
+name = "sub_82813540"
+
+[functions."0x828135E0"]
+name = "sub_828135E0"
+
+[functions."0x82814528"]
+name = "sub_82814528"
+
+[functions."0x828190C8"]
+name = "sub_828190C8"
+
+[functions."0x8281BF40"]
+name = "sub_8281BF40"
+
+[functions."0x82820700"]
+name = "sub_82820700"
+
+[functions."0x828263A8"]
+name = "sub_828263A8"
+
+[functions."0x8282B748"]
+name = "sub_8282B748"
+
+[functions."0x8282B788"]
+name = "sub_8282B788"
+
+[functions."0x8282B7A0"]
+name = "sub_8282B7A0"
+
+[functions."0x8282B7E8"]
+name = "sub_8282B7E8"
+
+[functions."0x8282B800"]
+name = "sub_8282B800"
+
+[functions."0x8282B818"]
+name = "sub_8282B818"
+
+[functions."0x8282B830"]
+name = "sub_8282B830"
+
+[functions."0x8282B848"]
+name = "sub_8282B848"
+
+[functions."0x82836B20"]
+name = "sub_82836B20"
+
+[functions."0x82837690"]
+name = "sub_82837690"
+
+[functions."0x82837698"]
+name = "sub_82837698"
+
+[functions."0x828376A8"]
+name = "sub_828376A8"
+
+[functions."0x8283BCA0"]
+name = "sub_8283BCA0"
+
+[functions."0x8283BCC0"]
+name = "sub_8283BCC0"
+
+[functions."0x8283E538"]
+name = "sub_8283E538"
+
+[functions."0x8283E540"]
+name = "sub_8283E540"
+
+[functions."0x8283E550"]
+name = "sub_8283E550"
+
+[functions."0x8283E558"]
+name = "sub_8283E558"
+
+[functions."0x8283E588"]
+name = "sub_8283E588"
+
+[functions."0x828450A0"]
+name = "sub_828450A0"
+
+[functions."0x82845300"]
+name = "sub_82845300"
+
+[functions."0x82845308"]
+name = "sub_82845308"
+
+[functions."0x828492E0"]
+name = "sub_828492E0"
+
+[functions."0x82849928"]
+name = "sub_82849928"
+
+[functions."0x82849930"]
+name = "sub_82849930"
+
+[functions."0x82855F90"]
+name = "sub_82855F90"
+
+[functions."0x82859B50"]
+name = "sub_82859B50"
+
+[functions."0x82859B70"]
+name = "sub_82859B70"
+
+[functions."0x82859B90"]
+name = "sub_82859B90"
+
+[functions."0x82859BD0"]
+name = "sub_82859BD0"
+
+[functions."0x82859BF0"]
+name = "sub_82859BF0"
+
+[functions."0x82859C10"]
+name = "sub_82859C10"
+
+[functions."0x82859C30"]
+name = "sub_82859C30"
+
+[functions."0x82859C50"]
+name = "sub_82859C50"
+
+[functions."0x8285C9C0"]
+name = "sub_8285C9C0"
+
+[functions."0x8285C9D8"]
+name = "sub_8285C9D8"
+
+[functions."0x8285CA20"]
+name = "sub_8285CA20"
+
+[functions."0x8285CA38"]
+name = "sub_8285CA38"
+
+[functions."0x8285DCD8"]
+name = "sub_8285DCD8"
+
+[functions."0x8285DD58"]
+name = "sub_8285DD58"
+
+[functions."0x8285DE08"]
+name = "sub_8285DE08"
+
+[functions."0x8289EDA8"]
+name = "sub_8289EDA8"
+
+[functions."0x8289EDC0"]
+name = "sub_8289EDC0"
+
+[functions."0x8289EDD8"]
+name = "sub_8289EDD8"
+
+[functions."0x828D17E8"]
+name = "sub_828D17E8"
+
+[functions."0x828DA270"]
+name = "sub_828DA270"
+
+[functions."0x8298CC08"]
+name = "sub_8298CC08"
+
+[functions."0x8298D0C8"]
+name = "sub_8298D0C8"
+
+[functions."0x82A44AD0"]
+name = "sub_82A44AD0"
+
+[functions."0x82A6D778"]
+name = "sub_82A6D778"
+
+[functions."0x82A6D9C0"]
+name = "sub_82A6D9C0"
+
+[functions."0x82A6E410"]
+name = "sub_82A6E410"
+
+[functions."0x82AEDFA0"]
+name = "sub_82AEDFA0"
+
+[functions."0x82AEE2B0"]
+name = "sub_82AEE2B0"
+
+[functions."0x82AEE368"]
+name = "sub_82AEE368"
+
+[functions."0x82AEE380"]
+name = "sub_82AEE380"
+
+[functions."0x82AEE3F8"]
+name = "sub_82AEE3F8"
+
+[functions."0x82AEEBC8"]
+name = "sub_82AEEBC8"
+
+[functions."0x82B59778"]
+name = "sub_82B59778"
+
+[functions."0x82BA2678"]
+name = "sub_82BA2678"
+
+[functions."0x82C7BBF8"]
+name = "sub_82C7BBF8"
+
+[functions."0x82F079C0"]
+name = "sub_82F079C0"
+
+[functions."0x82F155C8"]
+name = "sub_82F155C8"
+
+[functions."0x82F23190"]
+name = "sub_82F23190"
+
+[functions."0x82F336F0"]
+name = "sub_82F336F0"
+
+[functions."0x82F61598"]
+name = "sub_82F61598"
+
+[functions."0x82F61F20"]
+name = "sub_82F61F20"
+
+[functions."0x82F61F40"]
+name = "sub_82F61F40"
+
+[functions."0x82F67EF8"]
+name = "sub_82F67EF8"
+
+[functions."0x82F68058"]
+name = "sub_82F68058"
+
+[functions."0x82F68068"]
+name = "sub_82F68068"
+
+[functions."0x82F76EB8"]
+name = "sub_82F76EB8"
+
+[functions."0x82FCA510"]
+name = "sub_82FCA510"
+
+[functions."0x82FE0740"]
+name = "sub_82FE0740"
+
+[functions."0x82FE0750"]
+name = "sub_82FE0750"
+
+[functions."0x82FE07B8"]
+name = "sub_82FE07B8"
+
+[functions."0x82FE07C0"]
+name = "sub_82FE07C0"
+
+[functions."0x82FE07E8"]
+name = "sub_82FE07E8"
+
+[functions."0x82FE0868"]
+name = "sub_82FE0868"
+
+[functions."0x82FE0870"]
+name = "sub_82FE0870"
+
+[functions."0x82FE0880"]
+name = "sub_82FE0880"
+
+[functions."0x82FEB1A8"]
+name = "sub_82FEB1A8"
+
+[functions."0x83000120"]
+name = "sub_83000120"
+
+[functions."0x83018678"]
+name = "sub_83018678"
+
+[functions."0x830213D0"]
+name = "sub_830213D0"
+
+[functions."0x830395F8"]
+name = "sub_830395F8"
+
+[functions."0x83046FF0"]
+name = "sub_83046FF0"
+
+[functions."0x830AF908"]
+name = "sub_830AF908"
+
+[functions."0x830BB2C8"]
+name = "sub_830BB2C8"
+
+[functions."0x830D1480"]
+name = "sub_830D1480"
+
+[functions."0x830E3BC8"]
+name = "sub_830E3BC8"
+
+[functions."0x830E3BD0"]
+name = "sub_830E3BD0"
+
+[functions."0x83101800"]
+name = "sub_83101800"
+
+[functions."0x83153BC0"]
+name = "sub_83153BC0"
+
+[functions."0x83154DA0"]
+name = "sub_83154DA0"
+
+[functions."0x83156038"]
+name = "sub_83156038"
+
+[functions."0x83164CF0"]
+name = "sub_83164CF0"
+
+[functions."0x831CA7A8"]
+name = "sub_831CA7A8"
+
+[functions."0x832524C8"]
+name = "sub_832524C8"
+
+[functions."0x8330D270"]
+name = "sub_8330D270"
+
+[functions."0x8330D2B0"]
+name = "sub_8330D2B0"
+
+[functions."0x8330D2F0"]
+name = "sub_8330D2F0"
+
+[functions."0x8330D3D8"]
+name = "sub_8330D3D8"
+
+[functions."0x83311070"]
+name = "sub_83311070"
+
+[functions."0x83311078"]
+name = "sub_83311078"
+
+[functions."0x83311080"]
+name = "sub_83311080"
+
+[functions."0x833110E0"]
+name = "sub_833110E0"
+
+[functions."0x834CEAD0"]
+name = "sub_834CEAD0"
+
+[functions."0x834CEAE8"]
+name = "sub_834CEAE8"
+
+[functions."0x834EBB60"]
+name = "sub_834EBB60"
+
+[functions."0x835D9A10"]
+name = "sub_835D9A10"
+
+[functions."0x835DBC18"]
+name = "sub_835DBC18"
+
+[functions."0x835DBC20"]
+name = "sub_835DBC20"
+
+[functions."0x835DBC28"]
+name = "sub_835DBC28"
+
+[functions."0x835DBC30"]
+name = "sub_835DBC30"
+
+[functions."0x835DBC38"]
+name = "sub_835DBC38"
+
+[functions."0x835DBC50"]
+name = "sub_835DBC50"
+
+[functions."0x835DBCA8"]
+name = "sub_835DBCA8"
+
+[functions."0x835E0C00"]
+name = "sub_835E0C00"
+
+[functions."0x835E0C08"]
+name = "sub_835E0C08"
+
+[functions."0x835E0C18"]
+name = "sub_835E0C18"
+
+[functions."0x835E2050"]
+name = "sub_835E2050"
+
+[functions."0x835E2068"]
+name = "sub_835E2068"
+
+[functions."0x835E2078"]
+name = "sub_835E2078"
+
+[functions."0x835E2088"]
+name = "sub_835E2088"
+
+[functions."0x835E2090"]
+name = "sub_835E2090"
+
+[functions."0x835E2098"]
+name = "sub_835E2098"
+
+[functions."0x835E2858"]
+name = "sub_835E2858"
+
+[functions."0x835E3560"]
+name = "sub_835E3560"
+
+[functions."0x835E42C0"]
+name = "sub_835E42C0"
+
+[functions."0x835E42C8"]
+name = "sub_835E42C8"
+
+[functions."0x835E47B8"]
+name = "sub_835E47B8"
+
+[functions."0x835E71B0"]
+name = "sub_835E71B0"
+
+[functions."0x835F4F70"]
+name = "sub_835F4F70"
+
+[functions."0x835F4F80"]
+name = "sub_835F4F80"
+
+[functions."0x835F6768"]
+name = "sub_835F6768"
+
+[functions."0x835F6780"]
+name = "sub_835F6780"
+
+[functions."0x835F6788"]
+name = "sub_835F6788"
+
+[functions."0x836A0318"]
+name = "sub_836A0318"
+
+[functions."0x836B7880"]
+name = "sub_836B7880"
+
+[functions."0x83716070"]
+name = "sub_83716070"
+
+[functions."0x83722B30"]
+name = "sub_83722B30"
+
+[functions."0x83722B48"]
+name = "sub_83722B48"
+
+[functions."0x83724928"]
+name = "sub_83724928"
+
+[functions."0x83726228"]
+name = "sub_83726228"
+
+[functions."0x83726690"]
+name = "sub_83726690"
+
+[functions."0x8373C9C8"]
+name = "sub_8373C9C8"
+
+[functions."0x83808DE8"]
+name = "sub_83808DE8"
+
+[functions."0x83808E10"]
+name = "sub_83808E10"
+
+[functions."0x8384D698"]
+name = "sub_8384D698"
+
+[functions."0x8384D6B0"]
+name = "sub_8384D6B0"
+
+[functions."0x8395DE10"]
+name = "sub_8395DE10"
+
+[functions."0x83974688"]
+name = "sub_83974688"
+
+[functions."0x83974828"]
+name = "sub_83974828"
+
+[functions."0x8398FBA0"]
+name = "sub_8398FBA0"
+
+[functions."0x8398FBA8"]
+name = "sub_8398FBA8"
+
+[functions."0x8398FBD0"]
+name = "sub_8398FBD0"
+
+[functions."0x83998A80"]
+name = "sub_83998A80"
+
+[functions."0x839AF5F0"]
+name = "sub_839AF5F0"
+
+[functions."0x83A172C8"]
+name = "sub_83A172C8"
+
+
+# Pass 3: virtual-call thunks whose addresses code builds with lis/addi (find_address_taken_targets.py).
+[functions."0x830A2490"]
+name = "sub_830A2490"
+
+[functions."0x830A24A0"]
+name = "sub_830A24A0"
+
+[functions."0x830A24B0"]
+name = "sub_830A24B0"
+
+[functions."0x830A24C0"]
+name = "sub_830A24C0"
+
+[functions."0x830AB9F0"]
+name = "sub_830AB9F0"
+
+[functions."0x830ABA00"]
+name = "sub_830ABA00"
+
+[functions."0x830ABA10"]
+name = "sub_830ABA10"
+
+[functions."0x830ABA20"]
+name = "sub_830ABA20"
+
+[functions."0x830ABA30"]
+name = "sub_830ABA30"
+
+[functions."0x830ABA40"]
+name = "sub_830ABA40"
+
+[functions."0x830ABA50"]
+name = "sub_830ABA50"
+
+[functions."0x830ABA60"]
+name = "sub_830ABA60"
+
+[functions."0x830ABA70"]
+name = "sub_830ABA70"
+
+[functions."0x830ABA80"]
+name = "sub_830ABA80"
+
+[functions."0x830ABA90"]
+name = "sub_830ABA90"
+
+[functions."0x830ABAA0"]
+name = "sub_830ABAA0"
+
+[functions."0x830ABAB0"]
+name = "sub_830ABAB0"
+
+[functions."0x830ABAC0"]
+name = "sub_830ABAC0"
+
+[functions."0x830DA8C0"]
+name = "sub_830DA8C0"
+
+[functions."0x830DA8D0"]
+name = "sub_830DA8D0"
+
+[functions."0x830DA8E0"]
+name = "sub_830DA8E0"
+
+[functions."0x830DA8F0"]
+name = "sub_830DA8F0"
+
+[functions."0x830DA900"]
+name = "sub_830DA900"
+
+[functions."0x830DA910"]
+name = "sub_830DA910"
+
+[functions."0x830DA920"]
+name = "sub_830DA920"
+
+[functions."0x830DA930"]
+name = "sub_830DA930"
+
+[functions."0x830DA940"]
+name = "sub_830DA940"
+
+[functions."0x830DA950"]
+name = "sub_830DA950"
+
+[functions."0x830DA960"]
+name = "sub_830DA960"
+
+[functions."0x831021B0"]
+name = "sub_831021B0"
+
+[functions."0x831021C0"]
+name = "sub_831021C0"
+
+[functions."0x831021D0"]
+name = "sub_831021D0"
+
+[functions."0x831021E0"]
+name = "sub_831021E0"
+
+[functions."0x831021F0"]
+name = "sub_831021F0"
+
+[functions."0x83102200"]
+name = "sub_83102200"
+
+[functions."0x83102210"]
+name = "sub_83102210"
+
+[functions."0x83102220"]
+name = "sub_83102220"
+
+[functions."0x83102230"]
+name = "sub_83102230"
+
+
+# Pass 4: code addresses recompiled code builds with lis + addi/ori and stores (callbacks such as
+# 0x825B30D0, which aborted the second boot), each right after another function's end and not a branch
+# label; jump tables (words that are themselves code addresses) left out.
+[functions."0x82598EE0"]
+name = "sub_82598EE0"
+
+[functions."0x825A0010"]
+name = "sub_825A0010"
+
+[functions."0x825A0038"]
+name = "sub_825A0038"
+
+[functions."0x825B30D0"]
+name = "sub_825B30D0"
+
+[functions."0x8262FFFC"]
+name = "sub_8262FFFC"
+
+[functions."0x82637818"]
+name = "sub_82637818"
+
+[functions."0x82692E58"]
+name = "sub_82692E58"
+
+[functions."0x826A0004"]
+name = "sub_826A0004"
+
+[functions."0x826A0170"]
+name = "sub_826A0170"
+
+[functions."0x8276C570"]
+name = "sub_8276C570"
+
+[functions."0x82870000"]
+name = "sub_82870000"
+
+[functions."0x82886D28"]
+name = "sub_82886D28"
+
+[functions."0x82AC9A38"]
+name = "sub_82AC9A38"
+
+[functions."0x82AEE550"]
+name = "sub_82AEE550"
+
+[functions."0x82F57848"]
+name = "sub_82F57848"
+
+[functions."0x82F77B90"]
+name = "sub_82F77B90"
+
+[functions."0x82F77BB8"]
+name = "sub_82F77BB8"
+
+[functions."0x830B0880"]
+name = "sub_830B0880"
+
+[functions."0x830C0880"]
+name = "sub_830C0880"
+
+[functions."0x830E01E8"]
+name = "sub_830E01E8"
+
+[functions."0x83150518"]
+name = "sub_83150518"
+
+[functions."0x831535E8"]
+name = "sub_831535E8"
+
+[functions."0x8355FFF8"]
+name = "sub_8355FFF8"
+
+[functions."0x835D6004"]
+name = "sub_835D6004"
+
+[functions."0x836AED28"]
+name = "sub_836AED28"
+
+[functions."0x837223A8"]
+name = "sub_837223A8"
+
+[functions."0x837223C0"]
+name = "sub_837223C0"
+
+[functions."0x83868D58"]
+name = "sub_83868D58"
+
+
+# Pass 5: lone code pointers in data (not among other function pointers), each right after another
+# function's end and not a branch label.
+[functions."0x822FA120"]
+name = "sub_822FA120"
+
+[functions."0x82469194"]
+name = "sub_82469194"
+
+[functions."0x825A624C"]
+name = "sub_825A624C"
+
+[functions."0x825AA348"]
+name = "sub_825AA348"
+
+[functions."0x825AA64C"]
+name = "sub_825AA64C"
+
+[functions."0x825AFDEC"]
+name = "sub_825AFDEC"
+
+[functions."0x825B6118"]
+name = "sub_825B6118"
+
+[functions."0x825B79F0"]
+name = "sub_825B79F0"
+
+[functions."0x825B91C4"]
+name = "sub_825B91C4"
+
+[functions."0x825B933C"]
+name = "sub_825B933C"
+
+[functions."0x825C10A8"]
+name = "sub_825C10A8"
+
+[functions."0x826B3AB0"]
+name = "sub_826B3AB0"
+
+[functions."0x826C5A98"]
+name = "sub_826C5A98"
+
+[functions."0x827E0A18"]
+name = "sub_827E0A18"
+
+[functions."0x827E0A30"]
+name = "sub_827E0A30"
+
+[functions."0x827E0A38"]
+name = "sub_827E0A38"
+
+[functions."0x827E0A40"]
+name = "sub_827E0A40"
+
+[functions."0x827E0A48"]
+name = "sub_827E0A48"
+
+[functions."0x82813310"]
+name = "sub_82813310"
+
+[functions."0x8282B7B8"]
+name = "sub_8282B7B8"
+
+[functions."0x8282B7D0"]
+name = "sub_8282B7D0"
+
+[functions."0x82859BB0"]
+name = "sub_82859BB0"
+
+[functions."0x8285C900"]
+name = "sub_8285C900"
+
+[functions."0x8285C918"]
+name = "sub_8285C918"
+
+[functions."0x8285C930"]
+name = "sub_8285C930"
+
+[functions."0x8285C948"]
+name = "sub_8285C948"
+
+[functions."0x8285C960"]
+name = "sub_8285C960"
+
+[functions."0x8285C978"]
+name = "sub_8285C978"
+
+[functions."0x8285C990"]
+name = "sub_8285C990"
+
+[functions."0x8285C9A8"]
+name = "sub_8285C9A8"
+
+[functions."0x8285C9F0"]
+name = "sub_8285C9F0"
+
+[functions."0x8285CA08"]
+name = "sub_8285CA08"
+
+[functions."0x829C86AC"]
+name = "sub_829C86AC"
+
+[functions."0x82BF5910"]
+name = "sub_82BF5910"
+
+[functions."0x82C07180"]
+name = "sub_82C07180"
+
+[functions."0x82CAA6FC"]
+name = "sub_82CAA6FC"
+
+[functions."0x82D0B520"]
+name = "sub_82D0B520"
+
+[functions."0x82D0B5D0"]
+name = "sub_82D0B5D0"
+
+[functions."0x82D0B800"]
+name = "sub_82D0B800"
+
+[functions."0x82DC0578"]
+name = "sub_82DC0578"
+
+[functions."0x82DEA9DC"]
+name = "sub_82DEA9DC"
+
+[functions."0x83001350"]
+name = "sub_83001350"
+
+[functions."0x830213E8"]
+name = "sub_830213E8"
+
+[functions."0x83021400"]
+name = "sub_83021400"
+
+[functions."0x83030C04"]
+name = "sub_83030C04"
+
+[functions."0x83038000"]
+name = "sub_83038000"
+
+[functions."0x83040C04"]
+name = "sub_83040C04"
+
+[functions."0x830619F4"]
+name = "sub_830619F4"
+
+[functions."0x83068304"]
+name = "sub_83068304"
+
+[functions."0x8308911C"]
+name = "sub_8308911C"
+
+[functions."0x83168300"]
+name = "sub_83168300"
+
+[functions."0x831DF2D0"]
+name = "sub_831DF2D0"
+
+[functions."0x834F9AA8"]
+name = "sub_834F9AA8"
+
+[functions."0x835CC600"]
+name = "sub_835CC600"
+
+[functions."0x835D31FC"]
+name = "sub_835D31FC"
+
+[functions."0x835D5088"]
+name = "sub_835D5088"
+
+[functions."0x835D5200"]
+name = "sub_835D5200"
+
+[functions."0x835D556C"]
+name = "sub_835D556C"
+
+[functions."0x835D56AC"]
+name = "sub_835D56AC"
+
+[functions."0x835D5D8C"]
+name = "sub_835D5D8C"
+
+[functions."0x835D7060"]
+name = "sub_835D7060"
+
+[functions."0x835D7070"]
+name = "sub_835D7070"
+
+[functions."0x835DBC48"]
+name = "sub_835DBC48"
+
+[functions."0x835E2060"]
+name = "sub_835E2060"
+
+[functions."0x835F0D50"]
+name = "sub_835F0D50"
+
+[functions."0x835F3750"]
+name = "sub_835F3750"
+
+[functions."0x835F3760"]
+name = "sub_835F3760"
+

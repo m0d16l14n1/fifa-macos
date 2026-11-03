@@ -1,0 +1,103 @@
+# Function boundary overrides for cardsdll (filled in as codegen reports them).
+
+# The dispatch table (twice the code size, 0x4271E8 bytes) would start right after the image at 0x89330000 and
+# run into powdllzf's image at 0x89700000, which the game loads at boot: moved to the free space between
+# default.xex's table (ends 0x86B36630) and FootballCompEngzf's image (0x88000000).
+function_table_base = 0x87000000
+
+[functions]
+
+# Tail-call targets codegen reported as "target not in any function".
+[functions."0x8906635C"]
+name = "sub_8906635C"
+
+[functions."0x8913FE80"]
+name = "sub_8913FE80"
+
+
+# Code addresses stored in data that discovery never reached, each right after another function's end
+# (find_unregistered_targets.py); mid-function pointers are left out.
+[functions."0x89057D78"]
+name = "sub_89057D78"
+
+[functions."0x89058258"]
+name = "sub_89058258"
+
+[functions."0x89058620"]
+name = "sub_89058620"
+
+[functions."0x8905F9F8"]
+name = "sub_8905F9F8"
+
+[functions."0x8905FF80"]
+name = "sub_8905FF80"
+
+[functions."0x89060100"]
+name = "sub_89060100"
+
+[functions."0x890615D8"]
+name = "sub_890615D8"
+
+[functions."0x89062248"]
+name = "sub_89062248"
+
+[functions."0x8909C218"]
+name = "sub_8909C218"
+
+[functions."0x890B86A8"]
+name = "sub_890B86A8"
+
+[functions."0x890B86E0"]
+name = "sub_890B86E0"
+
+[functions."0x890B86F8"]
+name = "sub_890B86F8"
+
+[functions."0x890B8E80"]
+name = "sub_890B8E80"
+
+[functions."0x890DCF88"]
+name = "sub_890DCF88"
+
+[functions."0x8910C978"]
+name = "sub_8910C978"
+
+[functions."0x8913FC88"]
+name = "sub_8913FC88"
+
+[functions."0x89146108"]
+name = "sub_89146108"
+
+[functions."0x89146218"]
+name = "sub_89146218"
+
+[functions."0x89146398"]
+name = "sub_89146398"
+
+[functions."0x891463B0"]
+name = "sub_891463B0"
+
+[functions."0x891463C8"]
+name = "sub_891463C8"
+
+[functions."0x891A9E40"]
+name = "sub_891A9E40"
+
+[functions."0x891FC7D8"]
+name = "sub_891FC7D8"
+
+[functions."0x89218E18"]
+name = "sub_89218E18"
+
+[functions."0x89234CF0"]
+name = "sub_89234CF0"
+
+[functions."0x892352A0"]
+name = "sub_892352A0"
+
+[functions."0x89235900"]
+name = "sub_89235900"
+
+[functions."0x89235DD0"]
+name = "sub_89235DD0"
+

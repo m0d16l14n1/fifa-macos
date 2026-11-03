@@ -1,0 +1,67 @@
+# Function boundary overrides for powdll (filled in as codegen reports them).
+[functions]
+
+# Tail-call targets codegen reported as "target not in any function".
+[functions."0x897230DC"]
+name = "sub_897230DC"
+
+
+# Code addresses stored in data that discovery never reached, each right after another function's end
+# (find_unregistered_targets.py); mid-function pointers are left out.
+[functions."0x897209D8"]
+name = "sub_897209D8"
+
+[functions."0x8972FF00"]
+name = "sub_8972FF00"
+
+[functions."0x897314C0"]
+name = "sub_897314C0"
+
+[functions."0x89732150"]
+name = "sub_89732150"
+
+[functions."0x89732170"]
+name = "sub_89732170"
+
+[functions."0x897328E8"]
+name = "sub_897328E8"
+
+[functions."0x89732A08"]
+name = "sub_89732A08"
+
+[functions."0x89732C08"]
+name = "sub_89732C08"
+
+[functions."0x89732C20"]
+name = "sub_89732C20"
+
+[functions."0x89735960"]
+name = "sub_89735960"
+
+[functions."0x897372F8"]
+name = "sub_897372F8"
+
+[functions."0x8973E910"]
+name = "sub_8973E910"
+
+[functions."0x8973E918"]
+name = "sub_8973E918"
+
+[functions."0x8973E960"]
+name = "sub_8973E960"
+
+[functions."0x8975FE30"]
+name = "sub_8975FE30"
+
+[functions."0x89760148"]
+name = "sub_89760148"
+
+[functions."0x89760C70"]
+name = "sub_89760C70"
+
+[functions."0x89760CC8"]
+name = "sub_89760CC8"
+
+[functions."0x8976F808"]
+name = "sub_8976F808"
+
