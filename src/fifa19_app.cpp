@@ -89,15 +89,21 @@ static void SetMetalDefaults() {
       // refresh showed the newest: motion stepped 12 to 24 ms a refresh, which shows as judder on the crowd.
       // false: video_mode_refresh_rate's clock (uncapped at 240).
       {"gpu_vblank_display_sync", "true"},
-      // Temporal AA's place in FIFA's frame (temporal_aa_anchor_ps, temporal_aa_camera; on with
+      // Temporal AA's place in FIFA's frames (temporal_aa_anchor_ps, temporal_aa_camera; on with
       // fifa19_temporal_aa): the pass runs before the composite that first reads the scene (pixel shader
       // C4F1B7FC, texture 0 the 1280x720 scene; the depth is the frame's last depth resolve), and the camera is
       // the view-projection in the scene's vertex shaders' constants: the players' (443F0A79: c1-c4 after
       // skinning to world space; F4EC1B9B, 6798832A: c1-c4) and the skinned props' (EC79FAF2, 71347B6C:
       // c0-c3 after their world matrix in c32-c35). Found in a match frame dump (docs/METAL.md).
-      {"temporal_aa_anchor_ps", "C4F1B7FC4C922703"},
+      // Cut-scenes (the walk-out, replays): their composite is 758B47F9 (the scene at 1DFAD000), and their
+      // close-up players' shaders A54BD766 (c2-c5) and 06C55BAD (c1-c4), skinned to world space too.
+      {"temporal_aa_anchor_ps", "C4F1B7FC4C922703,758B47F940466C31"},
       {"temporal_aa_camera",
-       "443F0A79A4511E2A:1,EC79FAF2D2D5D3A2:0,71347B6C3E6EF3F3:0,F4EC1B9B71624CC5:1,6798832ABD1C5D32:1"},
+       "443F0A79A4511E2A:1,EC79FAF2D2D5D3A2:0,71347B6C3E6EF3F3:0,F4EC1B9B71624CC5:1,6798832ABD1C5D32:1,"
+       "A54BD766ED344F7E:2,06C55BAD4F0661F5:1"},
+      // FIFA writes no guest markers: the tone map begins at the composite, the HUD at its pixel shader
+      // (00801335, also the menus'). The UI layer (frame generation, HDR) keys on them; nothing else changes.
+      {"guest_marker_rules", "C4F1B7FC4C922703:tonemap,758B47F940466C31:tonemap,0080133593CCBAE3:ui"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (!rex::cvar::SetDefaultValue(name, value)) {
@@ -210,8 +216,11 @@ void Fifa19App::OnPostSetup() {
   // EA's engine (as in FIFA Street) leaves texture fetch constants tagged invalid whose address and
   // format fields are still in use.
   rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
-  // temporal_aa is a title's runtime switch (not read from a config file): FIFA's own setting sets it.
-  if (REXCVAR_GET(fifa19_temporal_aa)) rex::cvar::SetFlagByName("temporal_aa", "fsr");
+  // temporal_aa is a title's runtime switch (not read from a config file): FIFA's own setting sets it, and so
+  // does frame generation, which on Metal takes the temporal pass's depth and motion vectors.
+  if (REXCVAR_GET(fifa19_temporal_aa) || rex::cvar::GetFlagByName("frame_generation") != "off") {
+    rex::cvar::SetFlagByName("temporal_aa", "fsr");
+  }
   Fifa19DevPadStart();
 }
 

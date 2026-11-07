@@ -42,6 +42,10 @@ struct Setting: Identifiable {
         Setting(key: "fifa19_temporal_aa", title: "Temporal anti-aliasing (MetalFX)",
                 detail: "Less shimmer on lines and edges; the picture is softer (the grass's fine texture is smoothed).",
                 kind: .toggle, defaultValue: .bool(false)),
+        Setting(key: "frame_generation", title: "Frame generation (MetalFX)",
+                detail: "A frame generated between every two when the game runs below the display's rate: "
+                    + "cut-scenes and replays (30 FPS) at 60. Turns temporal anti-aliasing on. macOS 26.",
+                kind: .choice([("off", "Off"), ("fsr", "On")]), defaultValue: .string("off")),
         Setting(key: "metal_gpu_fences", title: "GPU fences",
                 detail: "Needed for the pitch's shadows (they are baked from GPU work at match load).",
                 kind: .toggle, defaultValue: .bool(true)),

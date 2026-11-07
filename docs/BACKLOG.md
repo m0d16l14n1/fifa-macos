@@ -39,7 +39,7 @@ how it is checked. Done items move to the end with their date.
 | # | Item |
 |---|---|
 | T5 | MetalFX temporal AA is soft in FIFA (half the local contrast of the picture without it, with or without jitter, the camera still): find whether a sub-pixel camera sway or the scaler at 1:1 does it; a sharpening pass after it | `taa*` runs, `out/tools/sharp.py` |
-| T6 | FIFA's tone map and HUD for the UI layer (synthesized guest markers: tone map at `C4F1B7FC`, UI at `00801335`), then MetalFX frame interpolation for the 30 FPS cut-scenes (2 refreshes a frame on a 60 Hz display) |
+| T8 | Frame generation: at some walk-out cuts one presented frame is a blend of the two shots (1 of 2 runs); either a cut still seen a frame late or the game's own dissolve. Bursts at the cuts with `temporal_aa_debug 11` | `cut3*` runs |
 | T7 | The players' own motion in the vectors (their skinning with last frame's bone constants) for TAA and interpolation without trails |
 | R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
@@ -63,4 +63,5 @@ how it is checked. Done items move to the end with their date.
 | D15 | Judder (seen as the crowd stuttering when the camera pans): the guest vblank on the display's refreshes (`gpu_vblank_display_sync`, `patches/fifa/0020`), FIFA's default. A match on a 60 Hz display: 60.0 frames shown a second, none repeated or dropped, each advancing 16.66 ms +-0.37 (uncapped at 240 Hz: ~80 FPS made, 12-24 ms a refresh). Measured from `present_log` with `scripts/present_stats.py` | 2026-11-08 |
 | D16 | Cut-scenes cheaper (`patches/fifa/0018`): MSAA 2x drawn as 1x (the walk-out's scene tiles, a third of the GPU) and static linear textures hashed less (27 -> 5-8 MB a frame): the walk-out from 17-31 uneven FPS to an even 30 synced (P6 for 60) | 2026-11-08 |
 | D17 | MetalFX temporal AA in FIFA (T1-T4): the scene, depth and camera found in a match frame (METAL.md), wired through the SDK's new title profile (`patches/fifa/0021`): `fifa19_temporal_aa` | 2026-11-08 |
+| D18 | MetalFX frame interpolation in FIFA (T6): the cut-scenes (30 FPS) at 60 on a 60 Hz display, generated only when they can be shown; tone map and HUD marked by `guest_marker_rules`, cuts from the cameras, the notifier no longer counted as UI (`patches/fifa/0022`) | 2026-11-08 |
 | D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |

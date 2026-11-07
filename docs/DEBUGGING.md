@@ -59,6 +59,7 @@ shots/*.ppm` converts them. `--metal_present_capture=<file.ppm>` writes one ever
 | what every thread is doing | `/usr/bin/sample <pid> 5` during play; `Sort by top of stack` at its end |
 | fences | `Metal fences: N a frame written by the GPU, M by the command processor at once` |
 | a wrong texture | `metal_debug_frame=<n>` logs every draw, texture load and resolve of frame n; `metal_debug_capture=true` (dev pad `set`) dumps a frame's resolves to `metal_debug_dir` |
+| temporal AA, frame generation | `--temporal_aa_debug=4` (every 120 frames: whether the pass ran, scene draws jittered), `11` (the camera cut check every frame), `--metal_taa_debug_vectors=true` (the motion vectors in place of the picture); the `Metal frame generation` lines (generated, presented, held back and why) |
 | a Metal error | `FIFA19_METAL_VALIDATION=1` |
 | a crash | `FIFA19_LLDB=1`, or the `.ips` report in `~/Library/Logs/DiagnosticReports` |
 | a GPU frame in detail | Xcode's Metal frame capture: `MTL_CAPTURE_ENABLED=1`, then capture from Xcode attached to the process |

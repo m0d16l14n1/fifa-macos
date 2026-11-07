@@ -104,8 +104,8 @@ What made matches fast (from 26-39 ms a frame before):
 | MetalFX **spatial** upscaling at present | in use (FIFA's patch) |
 | MetalFX **temporal** AA (`MTLFXTemporalScaler`) | **works, off by default** (`fifa19_temporal_aa`, launcher: Temporal anti-aliasing): the SDK's title profile (`patches/fifa/0021`) runs it every match frame at 60 FPS; less shimmer, but softer than without (the grass's fine texture is smoothed). Players' own motion is not in the vectors (camera only) |
 | MetalFX temporal **upscaling** | not useful as is: the game's post effects and HUD are drawn at 720p after the scene, so the scene can't be upscaled past 1280x720 there (BACKLOG R1) |
-| MetalFX **frame interpolation** (`MTLFXFrameInterpolator`, macOS 26) | in the backend, built on the HDR UI layer (the picture without the HUD interpolated, the HUD on top): needs FIFA's tone map and HUD located for it (BACKLOG T6) |
-| HDR (EDR, HDR10 metadata) | in the backend, needs FIFA's tone map and HUD located (BACKLOG T6) |
+| MetalFX **frame interpolation** (`MTLFXFrameInterpolator`, macOS 26) | **works, off by default** (`frame_generation=fsr`, launcher: Frame generation; turns temporal AA on): a frame generated between every two only while the game runs below the display's rate. The walk-out and replays (30 FPS) show 60 (300 generated frames presented in 10 s); matches at 60 generate nothing. Camera cuts reset it; at a few cuts one blended frame remains (BACKLOG T8). `patches/fifa/0022` |
+| HDR (EDR, HDR10 metadata) | in the backend; FIFA's tone map and HUD are now marked (`guest_marker_rules`), not tried yet |
 | Metal 4 (`MTL4CommandQueue`, argument tables, residency sets, `MTL4FX`) | **not in this base**: MCLA's Metal 4 work came after `ef468c4` and is left out; planned again from scratch for FIFA (PLAN, M6) |
 
 ### FIFA's frame, for the temporal paths (match, 2026-11-08)
@@ -120,6 +120,10 @@ From a frame dump (`metal_debug_capture`, `metal_debug_all_draws`) and the shade
    scene): the temporal pass's anchor.
 4. Depth-tested sprites over it (`7ABDFEFB`: player markers), the grade (`5BE4F29C`), the HUD (`00801335`), the
    final resolve to the front buffer.
+
+Cut-scenes (walk-out, replays) differ: their scene goes to `1DFAD000`, depth-based passes (`A006FC2A`) and a longer
+bloom follow, and their composite is `758B47F9`; their close-up players' shaders keep VP in c2-c5 (`A54BD766`) and
+c1-c4 (`06C55BAD`). FIFA marks the tone map at both composites and the UI at `00801335` (`guest_marker_rules`).
 
 The camera: the scene's vertex shaders end in `clip = VP x world`. The players' (`443F0A79`, skinned straight to
 world space) keep VP in c1-c4 and the camera's position in c0; the skinned props (`EC79FAF2`, `71347B6C`) in

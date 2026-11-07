@@ -1,0 +1,498 @@
+From 37be830c3d35f88ba60540f970fe32b719de69a5 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 03:38:38 +0700
+Subject: [PATCH] frame generation for a title without guest markers, on Metal
+
+What FIFA 19's cut-scenes (30 FPS, the game's own minimum frame time)
+needed to get MetalFX frame interpolation to 60:
+
+- guest_marker_rules: a title names the pixel shaders where its tone
+  map and UI begin; the markers are given at those draws (tone map after
+  the temporal pass's check, so the pass runs at the same draw).
+- temporal_aa_anchor_ps takes several shaders (one per kind of scene),
+  and the camera is the scene's last matching draw's (the first could
+  still hold the last frame's matrix: a cut seen a frame late).
+- Camera cuts seen in the cameras: the centre ray turning 10 degrees or
+  jumping 4 of its lengths (cuts move it 20-600; tracking shots 0.7 a
+  frame); temporal_aa_debug 11 logs the check.
+- UIDrawer/ImGuiDialog::HasContent: the achievement notifier, always
+  registered, counts as UI only while it shows a toast, so generated
+  frames are not held back under a UI that draws nothing.
+- The Metal presenter asks for a generated frame only while the game's
+  frames are far enough apart for it to be shown (4-5 ms of GPU each).
+
+FIFA 19: the walk-out at 60 on screen (300 generated frames presented
+in 10 s, 11 cuts reset in a walk-out), matches at 60 generate nothing.
+---
+ include/rex/graphics/command_processor.h   |  7 +-
+ include/rex/ui/imgui_dialog.h              |  4 +
+ include/rex/ui/imgui_drawer.h              |  6 ++
+ include/rex/ui/overlay/achievement_toast.h |  4 +-
+ include/rex/ui/presenter.h                 | 11 +++
+ include/rex/ui/ui_drawer.h                 |  5 ++
+ src/graphics/command_processor.cpp         | 61 ++++++++++++++
+ src/graphics/metal/metal_internal.h        |  2 +-
+ src/graphics/metal/metal_presenter.mm      | 20 +++--
+ src/graphics/temporal_aa.cpp               | 96 ++++++++++++++++++----
+ src/ui/imgui_drawer.cpp                    |  5 ++
+ src/ui/overlay/achievement_toast.cpp       |  5 ++
+ 12 files changed, 202 insertions(+), 24 deletions(-)
+
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index d25b49c..d05cf0b 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -223,6 +223,10 @@ class CommandProcessor {
+     kPhase = 0x100,     // diagnostics: value = a title-specific phase
+   };
+   virtual void OnGuestMarker(uint32_t kind, uint32_t value);
++  // guest_marker_rules: the marker to give at the current draw (by its pixel shader), 0 for none.
++  uint32_t MarkerRuleForDraw();
++  bool marker_rules_parsed_ = false;
++  std::vector<std::pair<uint64_t, uint32_t>> marker_rules_;
+ 
+   // HDR output (rexglue-hdr-ui-layer.patch): the guest's UI as a separate
+   // layer. From kUIBegin, the UI's render target (the one the first colour draw
+@@ -596,7 +600,8 @@ class CommandProcessor {
+   bool TaaProfileCheckDraw();
+   void TaaProfileParse();
+   bool taa_profile_parsed_ = false;
+-  uint64_t taa_profile_anchor_ = 0;
++  uint64_t taa_profile_anchor_ = 0;                // the first anchor (non-zero: a profile is set)
++  std::vector<uint64_t> taa_profile_anchors_;    // all of them (a title may have one per kind of scene)
+   std::vector<std::pair<uint64_t, uint32_t>> taa_profile_camera_;  // vertex shader hash, first row's constant
+   double taa_profile_vp_[4][4] = {}, taa_profile_prev_vp_[4][4] = {};  // row vectors: clip = position x VP
+   bool taa_profile_have_vp_ = false, taa_profile_have_prev_ = false, taa_profile_scene_seen_ = false;
+diff --git a/include/rex/ui/imgui_dialog.h b/include/rex/ui/imgui_dialog.h
+index 7be49e0..2939535 100644
+--- a/include/rex/ui/imgui_dialog.h
++++ b/include/rex/ui/imgui_dialog.h
+@@ -48,6 +48,10 @@ class ImGuiDialog {
+   // presents of its own.
+   virtual bool RepaintsContinuously() const { return true; }
+ 
++  // Whether the dialog shows anything now (ImGuiDrawer::HasContent). A notifier that waits for its next
++  // notification returns false.
++  virtual bool HasContent() const { return true; }
++
+  protected:
+   ImGuiDialog(ImGuiDrawer* imgui_drawer);
+ 
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+index a570fa0..dcfb14a 100644
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -101,6 +101,12 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+ 
+   // All currently-attached dialogs that get drawn.
+   std::vector<ImGuiDialog*> dialogs_;
++
++ public:
++  // UIDrawer: any of the dialogs shows something.
++  bool HasContent() const override;
++
++ private:
+   // Using an index, not an iterator, because after the erasure, the adjustment
+   // must be done for the vector element indices that would be in the iterator
+   // range that would be invalidated.
+diff --git a/include/rex/ui/overlay/achievement_toast.h b/include/rex/ui/overlay/achievement_toast.h
+index 7642601..2755735 100644
+--- a/include/rex/ui/overlay/achievement_toast.h
++++ b/include/rex/ui/overlay/achievement_toast.h
+@@ -34,6 +34,8 @@ class AchievementToastDialog : public AchievementNotificationDialog {
+ 
+   // Thread-safe: safe to call from any thread, including guest threads.
+   void Push(const rex::system::AchievementEvent& event) override;
++  // Only while a toast is queued or shown.
++  bool HasContent() const override;
+ 
+  protected:
+   void OnDraw(ImGuiIO& io) override;
+@@ -47,7 +49,7 @@ class AchievementToastDialog : public AchievementNotificationDialog {
+     std::optional<std::chrono::steady_clock::time_point> visible_since;
+   };
+ 
+-  std::mutex mutex_;
++  mutable std::mutex mutex_;
+   std::deque<PendingToast> queue_;
+   AchievementIconCache icon_cache_;
+ };
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+index 0effdac..5925ceb 100644
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -1227,6 +1227,17 @@ class Presenter {
+   // in input handling (in the input listeners in the Window), but in reverse.
+   std::multimap<size_t, UIDrawerReference> ui_drawers_;
+ 
++ protected:
++  // From the UI thread: whether any registered UI drawer has something to draw now (UIDrawer::HasContent).
++  bool UIDrawersHaveContent() const {
++    for (const auto& [z_order, reference] : ui_drawers_) {
++      if (reference.drawer->HasContent()) return true;
++    }
++    return false;
++  }
++
++ private:
++
+   size_t ui_draw_current_ = 0;
+   size_t ui_draw_current_z_order_;
+   std::multimap<size_t, UIDrawerReference>::iterator ui_draw_next_iterator_;
+diff --git a/include/rex/ui/ui_drawer.h b/include/rex/ui/ui_drawer.h
+index 4006af6..e288596 100644
+--- a/include/rex/ui/ui_drawer.h
++++ b/include/rex/ui/ui_drawer.h
+@@ -30,6 +30,11 @@ class UIDrawer {
+   // quitting or resizing, if done in the UI, must be deferred via something
+   // like WindowedAppContext::CallInUIThreadDeferred.
+   virtual void Draw(UIDrawContext& context) = 0;
++
++  // Whether it would draw anything now. A drawer that is registered but has nothing to show (a notifier between
++  // its notifications) lets the presenter treat the frame as having no UI (frame generation shows its frames
++  // only then).
++  virtual bool HasContent() const { return true; }
+ };
+ 
+ }  // namespace ui
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 1716680..734cf1d 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -150,6 +150,12 @@ REXCVAR_DEFINE_BOOL(occlusion_query_depth_test_always, false, "GPU",
+                     "(rexglue-occlusion-queries.patch)")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DEFINE_STRING(guest_marker_rules, "", "GPU",
++                      "Guest markers for a title that doesn't write them (set by the title): comma-separated "
++                      "<pixel shader hash>:<marker>, the marker (tonemap, ui, scene_end, render_end) given at "
++                      "each draw with that pixel shader, as if written before it (tonemap after the temporal "
++                      "AA pass's check, so that the pass can run at the same draw)")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_INT32(occlusion_query_log, 0, "GPU",
+                      "Log guest occlusion queries at info level: the first N begin and end events "
+                      "and results, every record's first use (the users of occlusion queries, with "
+@@ -1591,6 +1597,53 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+   return true;
+ }
+ 
++uint32_t CommandProcessor::MarkerRuleForDraw() {
++  if (!marker_rules_parsed_) {
++    marker_rules_parsed_ = true;
++    const std::string rules = REXCVAR_GET(guest_marker_rules);
++    size_t start = 0;
++    while (start < rules.size()) {
++      const size_t comma = rules.find(',', start);
++      const std::string entry =
++          rules.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
++      start = comma == std::string::npos ? rules.size() : comma + 1;
++      const size_t colon = entry.find(':');
++      if (colon == std::string::npos) {
++        continue;
++      }
++      const uint64_t hash = std::strtoull(entry.substr(0, colon).c_str(), nullptr, 16);
++      const std::string kind = entry.substr(colon + 1);
++      GuestMarkerKind marker = GuestMarkerKind(0);
++      if (kind == "tonemap") marker = GuestMarkerKind::kTonemapBegin;
++      else if (kind == "ui") marker = GuestMarkerKind::kUIBegin;
++      else if (kind == "scene_end") marker = GuestMarkerKind::kSceneEnd;
++      else if (kind == "render_end") marker = GuestMarkerKind::kRenderEnd;
++      if (hash && uint32_t(marker)) {
++        marker_rules_.emplace_back(hash, uint32_t(marker));
++      } else {
++        REXGPU_WARN("guest_marker_rules: '{}' is not <pixel shader hash>:<marker>", entry);
++      }
++    }
++    if (!marker_rules_.empty()) {
++      REXGPU_INFO("Guest markers: {} rules (guest_marker_rules)", marker_rules_.size());
++    }
++  }
++  if (marker_rules_.empty()) {
++    return 0;
++  }
++  Shader* pixel_shader = active_pixel_shader();
++  if (!pixel_shader) {
++    return 0;
++  }
++  const uint64_t hash = pixel_shader->ucode_data_hash();
++  for (const auto& [rule_hash, kind] : marker_rules_) {
++    if (rule_hash == hash) {
++      return kind;
++    }
++  }
++  return 0;
++}
++
+ void CommandProcessor::OnGuestMarker(uint32_t kind, [[maybe_unused]] uint32_t value) {
+   // For the resolve rules' "phase" and the resolve log.
+   if (kind == uint32_t(GuestMarkerKind::kFrameBegin)) {
+@@ -3050,11 +3103,19 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
+ 
+       bool major_mode_explicit =
+           xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
++      // A title's synthesized guest markers (guest_marker_rules) for this draw's pixel shader.
++      const uint32_t marker = MarkerRuleForDraw();
++      if (marker && marker != uint32_t(GuestMarkerKind::kTonemapBegin)) {
++        OnGuestMarker(marker, 0);
++      }
+       // HDR output: the UI layer (may change the alpha blend for this draw).
+       bool hdr_blend_overridden = HdrBeforeDraw();
+       // Temporal AA: a title profile's scene and camera, then the anti-aliasing pass before this draw.
+       TaaProfileBeforeDraw();
+       taa_pending_ = TaaCheckDraw();
++      if (marker == uint32_t(GuestMarkerKind::kTonemapBegin)) {
++        OnGuestMarker(marker, 0);
++      }
+       const bool occlusion_draw = occlusion_guest_open_ && occlusion_host_began_;
+       const uint64_t host_draws_recorded_before = host_draws_recorded_;
+       draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
+diff --git a/src/graphics/metal/metal_internal.h b/src/graphics/metal/metal_internal.h
+index a989f12..10187b6 100644
+--- a/src/graphics/metal/metal_internal.h
++++ b/src/graphics/metal/metal_internal.h
+@@ -159,7 +159,7 @@ class MetalPresenter final : public ui::Presenter {
+   // the game's own pacing, not from the paints, which wait for drawables).
+   std::chrono::steady_clock::time_point last_refresh_{};
+   std::atomic<double> refresh_interval_{0.0};
+-  double display_hz_ = 0.0;
++  std::atomic<double> display_hz_{0.0};  // written by the painting thread, read by the refreshing one
+   std::chrono::steady_clock::time_point display_hz_checked_{};
+   bool fg_logged_presenting_ = false;
+   uint32_t fg_presented_ = 0, fg_held_back_ = 0, fg_held_ui_ = 0, fg_held_late_ = 0, fg_held_rate_ = 0, fg_dropped_ = 0;
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index 42e0f06..7804b42 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -617,7 +617,13 @@ bool MetalPresenter::RefreshGuestOutputImpl(
+     id<MTLTexture> generated = nil;
+     const bool fg_wanted = frame_generation_wanted();
+     SetFrameGenerationUiSeparation(fg_wanted);
+-    if (fg_wanted) {
++    // Only while the guest's frames are far enough apart for a generated one to be shown (PaintAndPresentImpl
++    // shows it from 1.6 refreshes; asked from 1.4, so that one is ready when the game slows down): a game at the
++    // display's rate would pay MetalFX (4-5 ms of GPU a frame in FIFA 19) for frames never shown.
++    const double display_hz = display_hz_.load(std::memory_order_relaxed);
++    const double fg_display_hz = display_hz >= 24.0 ? display_hz : 60.0;
++    const bool fg_useful = refresh_interval_.load(std::memory_order_relaxed) >= 1.4 / fg_display_hz;
++    if (fg_wanted && fg_useful) {
+       {
+         generated = generated_textures_[mailbox_index];
+         if (!generated || generated.width != texture.width || generated.height != texture.height ||
+@@ -925,17 +931,21 @@ ui::Presenter::PaintResult MetalPresenter::PaintAndPresentImpl(bool execute_ui_d
+     if (now - display_hz_checked_ > std::chrono::seconds(1)) {
+       display_hz_checked_ = now;
+       NSScreen* screen = [NSScreen mainScreen];
+-      display_hz_ = screen ? double(screen.maximumFramesPerSecond) : 0.0;
++      display_hz_.store(screen ? double(screen.maximumFramesPerSecond) : 0.0, std::memory_order_relaxed);
+     }
+-    double refresh_hz = display_hz_ >= 24.0 ? display_hz_ : double(GetDisplayRefreshHz());
++    double refresh_hz = display_hz_.load(std::memory_order_relaxed);
++    if (!(refresh_hz >= 24.0)) refresh_hz = double(GetDisplayRefreshHz());
+     if (!(refresh_hz >= 24.0)) refresh_hz = 60.0;
+     const double frame_interval = refresh_interval_.load(std::memory_order_relaxed);
+     bool show_generated = false;
+     if (new_frame && generated_[mailbox_index] && generated_textures_[mailbox_index] && guest_output) {
+-      show_generated = !execute_ui_drawers && !late && frame_interval >= 1.6 / refresh_hz;
++      // The presenter's UI over a generated frame would show twice: only without any (registered drawers with
++      // nothing to draw, such as the achievement notifier between toasts, don't count).
++      const bool ui_shown = execute_ui_drawers && UIDrawersHaveContent();
++      show_generated = !ui_shown && !late && frame_interval >= 1.6 / refresh_hz;
+       if (!show_generated) {
+         ++fg_held_back_;
+-        if (execute_ui_drawers) ++fg_held_ui_;
++        if (ui_shown) ++fg_held_ui_;
+         else if (late) ++fg_held_late_;
+         else ++fg_held_rate_;
+       }
+diff --git a/src/graphics/temporal_aa.cpp b/src/graphics/temporal_aa.cpp
+index b4143bc..d2c024f 100644
+--- a/src/graphics/temporal_aa.cpp
++++ b/src/graphics/temporal_aa.cpp
+@@ -52,13 +52,14 @@ REXCVAR_DEFINE_STRING(temporal_aa_available, "unknown", "GPU",
+     .transient();
+ REXCVAR_DEFINE_STRING(temporal_aa_anchor_ps, "", "GPU",
+                       "Temporal anti-aliasing for a title without guest markers (set by the title): the pixel "
+-                      "shader (16 hex digits) of the first draw after the 3D scene that reads it (texture 0 is "
+-                      "the scene); the pass runs before it. Empty: Midnight Club's markers and motion blur")
++                      "shaders (16 hex digits, comma-separated) of the first draw after the 3D scene that reads "
++                      "it (texture 0 is the scene); the pass runs before it. Empty: Midnight Club's markers and "
++                      "motion blur")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_STRING(temporal_aa_camera, "", "GPU",
+                       "With temporal_aa_anchor_ps: where the scene's vertex shaders keep the view-projection, "
+                       "comma-separated <vertex shader hash>:<constant> (clip = rows c[n] to c[n+3] dot the "
+-                      "world position); the first of them drawn in a frame gives its camera")
++                      "world position); the last of them drawn in a frame's scene gives its camera")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_DOUBLE(temporal_aa_sharpness, 0.2, "GPU",
+                       "Temporal anti-aliasing: sharpening after FSR (RCAS), 0 (off) to 1")
+@@ -74,8 +75,9 @@ REXCVAR_DEFINE_UINT32(temporal_aa_debug, 0, "GPU",
+                       "in place of the gathered colour (a check of the gather), 9 the gathered colour is "
+                       "put in the corner of the scene texture instead of FSR's output, 10 the camera's "
+                       "near and far planes given to FSR the other way round (FSR's inverted-depth "
+-                      "check wants near > far; a picture that differs from 0 means the order matters)")
+-    .range(0, 10)
++                      "check wants near > far; a picture that differs from 0 means the order matters), 11 a "
++                      "title profile's camera cut check, every frame")
++    .range(0, 11)
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ REXCVAR_DEFINE_UINT32(temporal_aa_flip_jitter, 0, "GPU",
+                       "Temporal anti-aliasing, development: the jitter FSR is told, x (1) and y (2) "
+@@ -746,13 +748,23 @@ void CommandProcessor::TaaProfileParse() {
+   if (anchor.empty()) {
+     return;
+   }
+-  char* end = nullptr;
+-  taa_profile_anchor_ = std::strtoull(anchor.c_str(), &end, 16);
+-  if (!taa_profile_anchor_ || (end && *end)) {
+-    REXGPU_WARN("Temporal AA: temporal_aa_anchor_ps '{}' is not a shader hash", anchor);
+-    taa_profile_anchor_ = 0;
++  for (size_t start = 0; start < anchor.size();) {
++    const size_t comma = anchor.find(',', start);
++    const std::string entry =
++        anchor.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
++    start = comma == std::string::npos ? anchor.size() : comma + 1;
++    char* end = nullptr;
++    const uint64_t hash = std::strtoull(entry.c_str(), &end, 16);
++    if (!hash || (end && *end)) {
++      REXGPU_WARN("Temporal AA: temporal_aa_anchor_ps '{}' is not a shader hash", entry);
++      continue;
++    }
++    taa_profile_anchors_.push_back(hash);
++  }
++  if (taa_profile_anchors_.empty()) {
+     return;
+   }
++  taa_profile_anchor_ = taa_profile_anchors_.front();
+   const std::string camera = REXCVAR_GET(temporal_aa_camera);
+   size_t start = 0;
+   while (start < camera.size()) {
+@@ -770,8 +782,8 @@ void CommandProcessor::TaaProfileParse() {
+       taa_profile_camera_.emplace_back(hash, constant);
+     }
+   }
+-  REXGPU_INFO("Temporal AA: title profile, anchor pixel shader {:016X}, {} camera vertex shaders",
+-              taa_profile_anchor_, taa_profile_camera_.size());
++  REXGPU_INFO("Temporal AA: title profile, {} anchor pixel shaders, {} camera vertex shaders",
++              taa_profile_anchors_.size(), taa_profile_camera_.size());
+ }
+ 
+ void CommandProcessor::TaaProfileBeforeDraw() {
+@@ -796,7 +808,9 @@ void CommandProcessor::TaaProfileBeforeDraw() {
+     taa_frame_.in_scene = false;
+     taa_frame_.post = true;
+   }
+-  if (!taa_frame_.in_scene || taa_profile_have_vp_) {
++  // The camera from the scene's last draw with a known shader (the first may still have the last frame's
++  // matrix in its registers: a cut seen a frame late interpolated across it).
++  if (!taa_frame_.in_scene) {
+     return;
+   }
+   Shader* vertex_shader = active_vertex_shader();
+@@ -839,7 +853,8 @@ bool CommandProcessor::TaaProfileCheckDraw() {
+     return false;
+   }
+   Shader* pixel_shader = active_pixel_shader();
+-  if (!pixel_shader || pixel_shader->ucode_data_hash() != taa_profile_anchor_) {
++  if (!pixel_shader || std::find(taa_profile_anchors_.begin(), taa_profile_anchors_.end(),
++                                 pixel_shader->ucode_data_hash()) == taa_profile_anchors_.end()) {
+     return false;
+   }
+   taa_frame_.post = false;
+@@ -880,10 +895,59 @@ bool CommandProcessor::TaaProfileCheckDraw() {
+   constants.jitter[1] = taa_frame_.jitter[1];
+   constants.depth_map[0] = taa_profile_depth_map_[0];
+   constants.depth_map[1] = taa_profile_depth_map_[1];
+-  // A cut (the screen's centre at mid depth moved more than a third of the width since the last frame, or
+-  // went behind the camera): the history is dropped.
++  // A cut: the history is dropped. Seen in the cameras themselves (cut-scenes cut between nearby shots of the
++  // same players, where the picture's centre may move little): the ray through the screen's centre turned more
++  // than 10 degrees in a frame, or its point just past the near plane jumped more than 4 times the ray's length
++  // from there to mid depth (the walk-out's cuts: 20 to 600 times; its tracking shots move it up to 0.7 a frame
++  // along an unchanged ray); or the centre at mid depth moved more than a third of the width.
+   TaaCamera& camera = taa_camera_;
+   camera.reset = !taa_last_done_ || !taa_profile_have_prev_;
++  if (taa_profile_have_prev_) {
++    Mat4 previous_inverse;
++    if (!TaaInverse(taa_profile_prev_vp_, previous_inverse)) {
++      camera.reset = true;
++    } else {
++      // NDC (0, 0, z) to world, for a view-projection's inverse (row vectors).
++      auto unproject = [](const Mat4 inv, double z, double out[3]) {
++        double v[4] = {};
++        const double ndc[4] = {0.0, 0.0, z, 1.0};
++        for (uint32_t j = 0; j < 4; ++j) {
++          for (uint32_t i = 0; i < 4; ++i) {
++            v[j] += ndc[i] * inv[i][j];
++          }
++        }
++        const double w = std::abs(v[3]) > 1e-12 ? v[3] : 1e-12;
++        for (uint32_t i = 0; i < 3; ++i) {
++          out[i] = v[i] / w;
++        }
++      };
++      double near_now[3], mid_now[3], near_then[3], mid_then[3];
++      unproject(inverse, 0.01, near_now);
++      unproject(inverse, 0.5, mid_now);
++      unproject(previous_inverse, 0.01, near_then);
++      unproject(previous_inverse, 0.5, mid_then);
++      double ray_now[3], ray_then[3], moved_near[3];
++      for (uint32_t i = 0; i < 3; ++i) {
++        ray_now[i] = mid_now[i] - near_now[i];
++        ray_then[i] = mid_then[i] - near_then[i];
++        moved_near[i] = near_now[i] - near_then[i];
++      }
++      auto length = [](const double v[3]) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); };
++      const double now_length = length(ray_now), then_length = length(ray_then);
++      if (now_length > 1e-9 && then_length > 1e-9) {
++        const double cosine =
++            (ray_now[0] * ray_then[0] + ray_now[1] * ray_then[1] + ray_now[2] * ray_then[2]) /
++            (now_length * then_length);
++        if (cosine < 0.985 || length(moved_near) > 4.0 * now_length) {
++          camera.reset = true;
++        }
++        if (TaaDebug() == 11) {
++          REXGPU_INFO("Temporal AA cut check: cosine {:.5f}, near point moved {:.4f} of the ray, ray {:.3f}{}",
++                      cosine, length(moved_near) / now_length, now_length, camera.reset ? " - reset" : "");
++        }
++      }
++    }
++  }
+   {
+     const double centre[4] = {0.0, 0.0, 0.5, 1.0};
+     double moved[4] = {};
+diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
+index 9438093..3f6971e 100644
+--- a/src/ui/imgui_drawer.cpp
++++ b/src/ui/imgui_drawer.cpp
+@@ -135,6 +135,11 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
+   dialogs_.push_back(dialog);
+ }
+ 
++bool ImGuiDrawer::HasContent() const {
++  return std::any_of(dialogs_.begin(), dialogs_.end(),
++                     [](const ImGuiDialog* dialog) { return dialog->HasContent(); });
++}
++
+ void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
+   assert_not_null(dialog);
+   auto it = std::find(dialogs_.cbegin(), dialogs_.cend(), dialog);
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+index 53b8c0b..65630f3 100644
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -29,6 +29,11 @@ void AchievementToastDialog::Push(const rex::system::AchievementEvent& event) {
+   queue_.push_back({event, std::chrono::steady_clock::now()});
+ }
+ 
++bool AchievementToastDialog::HasContent() const {
++  std::lock_guard<std::mutex> lock(mutex_);
++  return !queue_.empty();
++}
++
+ void AchievementToastDialog::OnDraw(ImGuiIO& io) {
+   auto now = std::chrono::steady_clock::now();
+ 
+-- 
+2.56.0
+
