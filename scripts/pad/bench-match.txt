@@ -1,0 +1,37 @@
+# Benchmark: title screen to a Kick Off match (as kickoff.txt), 30 s of play measured, a picture, quit.
+# For scripts/bench_mac.sh; the markers frame the Metal frame-time lines it averages.
+wait 35s
+press start
+wait 25s
+press a
+wait 10s
+press a
+wait 6s
+press a
+wait 4s
+press a
+wait 14s
+press a
+wait 3s
+press a
+wait 25s
+press a
+wait 8s
+press a
+wait 45s
+press start
+wait 20s
+press a
+wait 3s
+press a
+wait 10s
+log bench_start
+stick lx 0.6 4s
+press a
+wait 8s
+stick ly -0.6 4s
+press d
+wait 12s
+log bench_end
+shot bench
+quit

@@ -1,0 +1,111 @@
+From 7a24649834c8842dcf1d2891ea814010b225d1c8 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 17:00:55 +0700
+Subject: [PATCH 12/14] threads (macOS): QoS user-interactive, guest priorities
+ as precedence, never SCHED_FIFO
+
+set_priority applied the POSIX ThreadPriority scale (1-32, normal 16) as a
+SCHED_FIFO priority. On macOS that takes the thread out of the QoS system at
+that absolute priority, where ordinary threads run at 31: every guest thread
+whose priority the game set ran below the rest of the Mac, and frames came
+late whenever anything else ran. Threads are now created as QoS
+user-interactive (performance cores first, never napped), and a priority is
+a Mach precedence (importance -8..+8 around the base).
+---
+ src/core/threading_posix.cpp | 37 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/src/core/threading_posix.cpp b/src/core/threading_posix.cpp
+index 92f129e..dfe137b 100644
+--- a/src/core/threading_posix.cpp
++++ b/src/core/threading_posix.cpp
+@@ -14,6 +14,7 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS5, "This
+ #include <signal.h>
+ 
+ #include <atomic>
++#include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <cstddef>
+@@ -44,6 +45,11 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC || REX_PLATFORM_PS5, "This
+ #include <rex/thread/timer_queue.h>
+ 
+ #include <sched.h>
++#if REX_PLATFORM_MAC
++#include <mach/mach.h>
++#include <mach/thread_policy.h>
++#include <pthread/qos.h>
++#endif
+ 
+ #if REX_PLATFORM_ANDROID
+ #include <dlfcn.h>
+@@ -876,6 +882,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
+       pthread_attr_destroy(&attr);
+       return false;
+     }
++#if REX_PLATFORM_MAC
++    // Every thread in the QoS system, as user-interactive work (performance cores first, never napped); its
++    // priority is applied as precedence once it exists (ApplyMacPrecedence). A fixed SCHED_FIFO priority would take
++    // it out of QoS at an absolute priority under the default of 31.
++    pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
++#else
+     if (params.initial_priority != 0) {
+       sched_param sched{};
+       sched.sched_priority = params.initial_priority + 1;
+@@ -888,14 +900,32 @@ class PosixCondition<Thread> : public PosixConditionBase {
+         return false;
+       }
+     }
++#endif
+     if (pthread_create(&thread_, &attr, ThreadStartRoutine, start_data) != 0) {
+       pthread_attr_destroy(&attr);
+       return false;
+     }
+     pthread_attr_destroy(&attr);
++#if REX_PLATFORM_MAC
++    if (params.initial_priority != 0) ApplyMacPrecedence(params.initial_priority + 1);
++#endif
+     return true;
+   }
+ 
++#if REX_PLATFORM_MAC
++  // The POSIX ThreadPriority scale (1 lowest, 16 normal, 32 highest) as Mach precedence: importance relative to
++  // the thread's QoS base priority, -8 to +8. pthread_setschedparam(SCHED_FIFO) would pin the thread at that
++  // absolute priority instead (16 for "normal", where ordinary threads run at 31): the game's threads starved
++  // behind every other app on the Mac.
++  void ApplyMacPrecedence(int priority) {
++    mac_priority_ = priority;
++    thread_precedence_policy_data_t policy{std::clamp((priority - 16) / 2, -8, 8)};
++    thread_policy_set(pthread_mach_thread_np(thread_), THREAD_PRECEDENCE_POLICY,
++                      reinterpret_cast<thread_policy_t>(&policy), THREAD_PRECEDENCE_POLICY_COUNT);
++  }
++  int mac_priority_ = 16;
++#endif
++
+   /// Constructor for existing thread. This should only happen once called by
+   /// Thread::GetCurrentThread() on the main thread
+   explicit PosixCondition(pthread_t thread)
+@@ -1056,6 +1086,9 @@ class PosixCondition<Thread> : public PosixConditionBase {
+ 
+   int priority() {
+     WaitStarted();
++#if REX_PLATFORM_MAC
++    return mac_priority_;
++#endif
+     int policy;
+     sched_param param{};
+     int ret = pthread_getschedparam(thread_, &policy, &param);
+@@ -1068,6 +1101,10 @@ class PosixCondition<Thread> : public PosixConditionBase {
+ 
+   void set_priority(int new_priority) {
+     WaitStarted();
++#if REX_PLATFORM_MAC
++    ApplyMacPrecedence(new_priority);
++    return;
++#endif
+     sched_param param{};
+     param.sched_priority = new_priority;
+     int result = pthread_setschedparam(thread_, SCHED_FIFO, &param);
+-- 
+2.56.0
+

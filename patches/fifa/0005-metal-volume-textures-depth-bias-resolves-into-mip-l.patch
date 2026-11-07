@@ -1,0 +1,639 @@
+From c94f9ff481a8bd782382530b9b21e4a00e836ee3 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 15:08:00 +0700
+Subject: [PATCH 05/14] metal: volume textures, depth bias, resolves into mip
+ levels, GPU fences only after resolves, MetalFX present upscale, stall
+ reports
+
+- Volume (3D) textures load, tiled (Xenos 3D tiling) or linear, into
+  MTLTextureType3D. FIFA 19's tone map grades colour through two 32x32x32
+  LUTs; sampled as zero they left every match black.
+- Polygon offset (PA_SU_POLY_OFFSET_*) applied as the Vulkan backend does.
+- metal_resolve_into_mips: a resolve that lands exactly on a level of a loaded
+  tiled texture with mips is blitted into that level and the texture kept.
+  FIFA's 2048x2048 k_4_4_4_4 downsample chain reloaded 8 MB+ per level.
+- metal_gpu_fences: a fence with no resolve since the last one (and no GPU
+  fence still pending) is written at once; metal_gpu_fences_all writes every
+  one on the GPU. Stats count both.
+- metal_present_upscale=metalfx: MetalFX spatial upscaling of the guest output
+  to the window (SDR only).
+- metal_hitch_log_ms (250): a log line per slow frame; metal_stall_sample_ms
+  (off): /usr/bin/sample of every thread when no swap came for that long.
+---
+ src/graphics/metal/metal_command_processor.mm |  54 +++++++
+ src/graphics/metal/metal_draw.h               |  29 +++-
+ src/graphics/metal/metal_draw.mm              | 146 +++++++++++++++---
+ src/graphics/metal/metal_internal.h           |  17 ++
+ src/graphics/metal/metal_presenter.mm         |  63 ++++++++
+ src/graphics/metal/metal_resolve.h            |  34 +++-
+ 6 files changed, 319 insertions(+), 24 deletions(-)
+
+diff --git a/src/graphics/metal/metal_command_processor.mm b/src/graphics/metal/metal_command_processor.mm
+index 6b7dda2..34f6304 100644
+--- a/src/graphics/metal/metal_command_processor.mm
++++ b/src/graphics/metal/metal_command_processor.mm
+@@ -17,6 +17,10 @@
+ #include "metal_shaders.h"
+ #include "metal_draw.h"
+ #include <pthread.h>
++#include <spawn.h>
++#include <unistd.h>
++#include <ctime>
++#include <filesystem>
+ #include <sys/qos.h>
+ 
+ #include <xxhash.h>
+@@ -44,6 +48,14 @@ REXCVAR_DEFINE_BOOL(metal_taa_upscale, true, "GPU/Metal",
+                     "MetalFX upscaling with temporal_aa_upscale above 1 (the game's FSR upscaling setting): the scene drawn "
+                     "into the render-size corner of its targets and stretched back by its resolves");
+ REXCVAR_DEFINE_BOOL(metal_resolves, true, "GPU/Metal", "Resolves (diagnostic: false skips them)");
++REXCVAR_DEFINE_INT32(metal_hitch_log_ms, 250, "GPU/Metal",
++                     "Log a 'Metal hitch' line for every frame that took at least this long (0: off)")
++    .range(0, 60000);
++REXCVAR_DEFINE_INT32(metal_stall_sample_ms, 0, "GPU/Metal",
++                     "When no frame came for this long, write every thread's stack (/usr/bin/sample) to "
++                     "stall-<time>.txt in the working folder, once a stall (0: off)")
++    .range(0, 600000)
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_DOUBLE(metal_motion_blur_fps, 60.0, "GPU/Metal",
+     "MCLA's motion blur as long as at this frame rate at most: the game blurs by one frame's motion, so at 30 FPS "
+     "(or 29 with frame generation) twice as long as at 60. 0: the game's own length")
+@@ -141,10 +153,47 @@ bool MetalCommandProcessor::SetupContext() {
+   };
+   REXGPU_INFO("Metal backend: native drawing (in development; MSAA is drawn as supersampling)");
+   stats_since_ms_ = chrono::Clock::QueryHostUptimeMillis();
++  if (REXCVAR_GET(metal_stall_sample_ms) > 0) {
++    last_swap_ms_.store(chrono::Clock::QueryHostUptimeMillis(), std::memory_order_relaxed);
++    stall_watchdog_ = std::thread([this] { StallWatchdog(); });
++  }
+   return true;
+ }
+ 
++void MetalCommandProcessor::StallWatchdog() {
++  pthread_setname_np("rexglue Metal stall watchdog");
++  const uint64_t limit = uint64_t(REXCVAR_GET(metal_stall_sample_ms));
++  uint64_t reported_for = 0;  // the swap time of the stall already sampled
++  std::unique_lock<std::mutex> lock(stall_mutex_);
++  while (!stall_cv_.wait_for(lock, std::chrono::milliseconds(250), [this] { return stall_quit_; })) {
++    const uint64_t last = last_swap_ms_.load(std::memory_order_relaxed);
++    const uint64_t now = chrono::Clock::QueryHostUptimeMillis();
++    if (now - last < limit || last == reported_for) continue;
++    reported_for = last;
++    const std::time_t wall = std::time(nullptr);
++    char stamp[32];
++    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&wall));
++    const std::string file = (std::filesystem::current_path() / fmt::format("stall-{}.txt", stamp)).string();
++    const std::string pid = std::to_string(getpid());
++    REXGPU_WARN("Metal stall: no frame for {} ms; sampling every thread to {}", now - last, file);
++    // /usr/bin/sample <pid> 2 -mayDie -file <path>: two seconds of every thread's stacks.
++    const char* argv[] = {"/usr/bin/sample", pid.c_str(), "2", "-mayDie", "-file", file.c_str(), nullptr};
++    pid_t child = 0;
++    if (posix_spawn(&child, argv[0], nullptr, nullptr, const_cast<char* const*>(argv), nullptr) != 0)
++      REXGPU_WARN("Metal stall: /usr/bin/sample could not be started");
++    // Not waited for here: the sample takes seconds and the thread must still see a quit.
++  }
++}
++
+ void MetalCommandProcessor::ShutdownContext() {
++  if (stall_watchdog_.joinable()) {
++    {
++      std::lock_guard<std::mutex> lock(stall_mutex_);
++      stall_quit_ = true;
++    }
++    stall_cv_.notify_all();
++    stall_watchdog_.join();
++  }
+   if (command_queue_) {
+     @autoreleasepool {
+       id<MTLCommandBuffer> drain = [command_queue_ commandBuffer];
+@@ -520,7 +569,12 @@ void MetalCommandProcessor::IssueSwap([[maybe_unused]] uint32_t frontbuffer_ptr,
+     const double interval = std::chrono::duration<double>(now - last_swap_time_).count();
+     if (last_swap_time_ != std::chrono::steady_clock::time_point{} && interval < 0.25)
+       frame_interval_ = frame_interval_ > 0.0 ? frame_interval_ * 0.9 + interval * 0.1 : interval;
++    const int32_t hitch_ms = REXCVAR_GET(metal_hitch_log_ms);
++    if (hitch_ms > 0 && last_swap_time_ != std::chrono::steady_clock::time_point{} &&
++        interval * 1000.0 >= double(hitch_ms))
++      REXGPU_WARN("Metal hitch: {:.0f} ms between swaps {} and {}", interval * 1000.0, swaps_ - 1, swaps_);
+     last_swap_time_ = now;
++    last_swap_ms_.store(chrono::Clock::QueryHostUptimeMillis(), std::memory_order_relaxed);
+   }
+   ++stats_swaps_;
+   // In free roam on the scripted route (40 s in at 30 swaps a second), when most shaders are loaded.
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index 525e7d1..491020c 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -18,6 +18,14 @@
+ #include <vector>
+ 
+ namespace rex::graphics::metal {
++
++// Constants of the load_texture kernel (LoadConstants in metal_resolve.h; the two must match).
++struct TextureLoadConstants {
++  uint32_t src_base, slice_stride, row_pitch_bytes, pitch_blocks, log_bpp, ox, oy, tiled, xor_mask, bw, bh, convert;
++  // 1: the grid's z is a depth slice of a 3D texture, addressed with the Xenos 3D tiling when tiled
++  // (slice_stride is then the linear layout's z stride). height_blocks: the level's tile-aligned height.
++  uint32_t volume = 0, height_blocks = 0;
++};
+ class MetalPrimitiveProcessor;
+ class MetalDraw {
+  public:
+@@ -255,7 +263,10 @@ class MetalDraw {
+   // Fence values for the GPU to copy into guest memory, a slot each (many frames' worth before reuse).
+   id<MTLBuffer> fence_values_ = nil;
+   uint32_t fence_slot_ = 0;
+-  uint64_t fences_ = 0;
++  uint64_t fences_ = 0, fences_immediate_ = 0;
++  // A resolve wrote guest memory on the GPU since the last fence; the command buffer of the last GPU fence.
++  bool resolve_since_fence_ = true;
++  id<MTLCommandBuffer> last_fence_commands_ = nil;
+   uint64_t texture_loads_ = 0, snapshot_hashed_ = 0, snapshot_copied_ = 0;
+   id<MTLCommandBuffer> commands_ = nil;
+   id<MTLRenderCommandEncoder> encoder_ = nil;
+@@ -360,6 +371,22 @@ class MetalDraw {
+   // what it wrote (same address, size and format). Guest memory is the truth for everything else.
+   struct ResolvedTexture { id<MTLTexture> texture; uint32_t start, length, width, height, format, pitch = 0; };
+   static bool ResolveFormatMatches(uint32_t resolved, uint32_t fetched);
++  // A level of a loaded tiled texture with mips that a resolve may land on exactly (metal_resolve_into_mips),
++  // by the level's guest address. The texture is checked against its entry's when used: a dropped or reloaded
++  // entry makes it stale.
++  struct MipTarget {
++    TextureEntry* entry;
++    id<MTLTexture> texture;
++    uint32_t level, width, height, pitch, format, length;
++  };
++  std::unordered_map<uint32_t, MipTarget> mip_targets_;
++  uint64_t resolves_into_mips_ = 0;
++  void AddMipTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address, uint32_t width,
++                    uint32_t height, uint32_t pitch, uint32_t format, uint32_t length);
++  // Copies a resolve into the level of a loaded texture it lands on exactly, keeping that texture; false when
++  // there is none (the resolve then drops what it overlaps, as always).
++  bool ResolveIntoMip(id<MTLTexture> destination, uint32_t address, uint32_t width, uint32_t height, uint32_t pitch,
++                      uint32_t format, uint32_t extent_start, uint32_t extent_length);
+   static bool TilesDisjoint(uint32_t a_address, uint32_t a_width, uint32_t a_height, uint32_t a_pitch, uint32_t a_format,
+                             uint32_t b_address, uint32_t b_width, uint32_t b_height, uint32_t b_pitch, uint32_t b_format);
+   id<MTLTexture> ComposeResolves(uint32_t address, uint32_t width, uint32_t height, uint32_t pitch, uint32_t macro_row_bytes,
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 387695e..202a263 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -25,10 +25,19 @@ REXCVAR_DEFINE_BOOL(metal_constant_ring, true, "GPU/Metal",
+     "Shader constants written into a ring buffer and bound by offset instead of copied into each command (setBytes)")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_BOOL(metal_gpu_fences, false, "GPU/Metal",
+-    "Guest fences (EVENT_WRITE_SHD) written by the GPU after the work before them, not by the command processor");
++    "Guest fences (EVENT_WRITE_SHD) written by the GPU after the work before them, not by the command processor. "
++    "A fence with no resolve before it (since the last fence) is still written at once, unless metal_gpu_fences_all");
++REXCVAR_DEFINE_BOOL(metal_gpu_fences_all, false, "GPU/Metal",
++    "With metal_gpu_fences: every fence written by the GPU, also those no resolve came before (each commits a "
++    "command buffer)");
+ REXCVAR_DEFINE_BOOL(metal_resolve_to_memory, true, "GPU/Metal", "Resolves write guest memory (diagnostic: false keeps them on the GPU only)");
+ REXCVAR_DEFINE_BOOL(metal_draw_cpu_only, false, "GPU/Metal", "Draws stop after the primitive processor and the vertex snapshot (diagnostic)");
+ REXCVAR_DEFINE_BOOL(metal_texture_loads, true, "GPU/Metal", "Load textures from guest memory (diagnostic: false binds a blank texture)");
++REXCVAR_DEFINE_BOOL(metal_resolve_into_mips, true, "GPU/Metal",
++                    "A resolve that lands exactly on a level of a loaded texture with mips (same address, size, "
++                    "pitch and format) is copied into that level, and the texture kept. FIFA 19 builds a "
++                    "2048x2048 downsample chain level by level: each level dropped and reloaded the texture "
++                    "(8 MB untiled per level). false: every resolve drops what it overlaps");
+ REXCVAR_DEFINE_BOOL(metal_texture_mips, true, "GPU/Metal",
+                     "Load textures' mip levels and sample them with the fetch's mip filter and anisotropic "
+                     "filtering (anisotropic_override); false: the base level only, as before (shimmering "
+@@ -342,6 +351,15 @@ bool MetalDraw::DebugFrame() const {
+ }
+ bool MetalDraw::WriteFence(uint32_t address, uint32_t value) {
+   if (!REXCVAR_GET(metal_gpu_fences) || !memory_buffer_ || !fence_values_ || address > 0x1FFFFFFCu) return false;
++  // Nothing the GPU writes to guest memory since the last fence, and that fence already written: the command
++  // processor writes this one at once (a later value can't be overtaken by an earlier one still on the GPU).
++  if (!REXCVAR_GET(metal_gpu_fences_all) && !resolve_since_fence_ &&
++      (!last_fence_commands_ || last_fence_commands_.status >= MTLCommandBufferStatusCompleted)) {
++    last_fence_commands_ = nil;
++    ++fences_immediate_;
++    return false;
++  }
++  resolve_since_fence_ = false;
+   // 4096 slots: about 8 fences a frame and two frames in flight, so a slot is long done before its reuse.
+   uint32_t slot = fence_slot_++ & 4095;
+   static_cast<uint32_t*>(fence_values_.contents)[slot] = value;
+@@ -351,6 +369,7 @@ bool MetalDraw::WriteFence(uint32_t address, uint32_t value) {
+   [blit copyFromBuffer:fence_values_ sourceOffset:slot * 4 toBuffer:memory_buffer_ destinationOffset:address size:4];
+   [blit endEncoding];
+   // Committed now, so a guest waiting for it doesn't wait for the end of the frame.
++  last_fence_commands_ = commands_;
+   Submit(false);
+   ++fences_;
+   return true;
+@@ -376,8 +395,9 @@ void MetalDraw::EndFrame() {
+       REXGPU_WARN("Metal resolves: {} bytes outside their destination extent not written", rejected);
+       *static_cast<uint32_t*>(resolve_rejected_.contents) = 0;
+     }
+-    REXGPU_INFO("Metal fences: {:.1f} a frame written by the GPU", fences_ / 150.0);
+-    fences_ = 0;
++    REXGPU_INFO("Metal fences: {:.1f} a frame written by the GPU, {:.1f} by the command processor at once",
++                fences_ / 150.0, fences_immediate_ / 150.0);
++    fences_ = 0; fences_immediate_ = 0;
+     if (transfers_dropped_ || textures_unsupported_) {
+       REXGPU_WARN("Metal: {} EDRAM transfers dropped (formats without a transfer), {} texture fetches sampled as zero in 150 frames",
+                   transfers_dropped_, textures_unsupported_);
+@@ -397,6 +417,10 @@ void MetalDraw::EndFrame() {
+         "{} vertex or index ranges ({} bytes) changed between two draws of a frame in 150 frames", thread_ms,
+         wait_us_ / 1000.0 / 150, snapshot_changed_, snapshot_changed_bytes_);
+     snapshot_changed_ = 0; snapshot_changed_bytes_ = 0;
++    if (resolves_into_mips_) {
++      REXGPU_INFO("Metal: {:.1f} resolves a frame copied into a loaded texture's mip level", resolves_into_mips_ / 150.0);
++      resolves_into_mips_ = 0;
++    }
+     REXGPU_INFO("Metal frame time: {:.1f} ms a frame, GPU busy {:.1f} ms, CPU waiting for the GPU {:.1f} ms; {:.1f} texture loads ({:.1f} made from resolves, {:.0f} rows loaded for them), {:.1f} resolve textures reused, "
+         "{:.1f} MB of vertices and indices hashed and {:.1f} MB copied ({:.0f} kept from earlier frames), {:.1f} MB of textures hashed ({:.1f} skipped by watches), "
+         "{:.1f} EDRAM transfers ({:.1f} in the draw's pass), {:.1f} resolve clears in the next pass ({:.1f} as its load action), {:.1f} render passes ({:.1f} draws kept in the open pass, {:.1f} passes restarted for transfers, {:.1f} ended for texture loads, {:.1f} loads before their pass) a frame; {} pipelines created ({:.1f} ms), {} from the storage ({:.1f} ms waited for), {} draws left out while Metal compiled",
+@@ -438,7 +462,7 @@ void MetalDraw::EndFrame() {
+       entry.texture = nil; entry.cached = false; entry.has_hash = false; entry.hash = 0; entry.checked_frame = 0;
+       entry.has_range = false;
+     }
+-    cached_textures_ = 0; range_index_.clear(); max_range_length_ = 0; views_.clear();
++    cached_textures_ = 0; range_index_.clear(); max_range_length_ = 0; views_.clear(); mip_targets_.clear();
+   }
+ }
+ void MetalDraw::DropTexture(TextureEntry& entry) {
+@@ -451,6 +475,44 @@ void MetalDraw::DropViews(id<MTLTexture> texture) {
+   if (!texture) return;
+   views_.erase(reinterpret_cast<uintptr_t>((__bridge void*)texture));
+ }
++void MetalDraw::AddMipTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address,
++                             uint32_t width, uint32_t height, uint32_t pitch, uint32_t format, uint32_t length) {
++  if (!REXCVAR_GET(metal_resolve_into_mips) || !entry.watch) return;  // unwatched: rehashed, would reload anyway
++  mip_targets_[address] = {&entry, texture, level, width, height, pitch, format, length};
++}
++bool MetalDraw::ResolveIntoMip(id<MTLTexture> destination, uint32_t address, uint32_t width, uint32_t height,
++                               uint32_t pitch, uint32_t format, uint32_t extent_start, uint32_t extent_length) {
++  if (!REXCVAR_GET(metal_resolve_into_mips)) return false;
++  auto found = mip_targets_.find(address);
++  if (found == mip_targets_.end()) return false;
++  MipTarget& t = found->second;
++  TextureEntry& entry = *t.entry;
++  if (!entry.cached || entry.texture != t.texture) { mip_targets_.erase(found); return false; }
++  // Exactly the level: its size, pitch and format, and no bytes outside it (a larger resolve covers other data).
++  if (t.width != width || t.height != height || t.pitch != pitch || !ResolveFormatMatches(format, t.format) ||
++      t.texture.pixelFormat != destination.pixelFormat || t.level >= t.texture.mipmapLevelCount ||
++      extent_start < address || uint64_t(extent_start) + extent_length > uint64_t(address) + t.length)
++    return false;
++  // The texture stays: out of the range index while the resolve drops what else it overlaps, then back.
++  const uint32_t range_start = entry.range_start, range_length = entry.range_length;
++  const bool had_range = entry.has_range;
++  if (had_range) {
++    for (auto [i, e] = range_index_.equal_range(range_start); i != e; ++i)
++      if (i->second.second == &entry) { range_index_.erase(i); break; }
++    entry.has_range = false;
++  }
++  InvalidateRange(extent_start, extent_length);
++  if (had_range) SetTextureRange(entry, range_start, range_length);
++  auto blit = [commands_ blitCommandEncoder];
++  if (REXCVAR_GET(metal_debug_labels))
++    blit.label = [NSString stringWithFormat:@"resolve %ux%u into mip %u", width, height, t.level];
++  [blit copyFromTexture:destination sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
++             sourceSize:MTLSizeMake(width, height, 1) toTexture:t.texture destinationSlice:0
++       destinationLevel:t.level destinationOrigin:MTLOriginMake(0, 0, 0)];
++  [blit endEncoding];
++  ++resolves_into_mips_;
++  return true;
++}
+ void MetalDraw::InvalidateRange(uint32_t start, uint32_t length) {
+   if (!length) return;
+   uint64_t end = uint64_t(start) + length;
+@@ -1119,6 +1181,17 @@ bool MetalDraw::Draw(Shader* vs, Shader* ps) {
+     auto raster = regs_.Get<reg::PA_SU_SC_MODE_CNTL>();
+     [encoder_ setFrontFacingWinding:raster.face ? MTLWindingClockwise : MTLWindingCounterClockwise];
+     [encoder_ setCullMode:!polygonal ? MTLCullModeNone : raster.cull_front ? MTLCullModeFront : raster.cull_back ? MTLCullModeBack : MTLCullModeNone];
++    {
++      // Polygon offset (PA_SU_POLY_OFFSET_*: decals, the pitch's markings over the grass), scaled as the
++      // Vulkan backend scales it for its host depth formats.
++      float bias_slope = 0.0f, bias_constant = 0.0f;
++      draw_util::GetPreferredFacePolygonOffset(regs_, polygonal, bias_slope, bias_constant);
++      bias_constant *= regs_.Get<reg::RB_DEPTH_INFO>().depth_format == xenos::DepthRenderTargetFormat::kD24S8
++                           ? draw_util::kD3D10PolygonOffsetFactorUnorm24
++                           : draw_util::kD3D10PolygonOffsetFactorFloat24;
++      bias_slope *= xenos::kPolygonOffsetScaleSubpixelUnit;
++      [encoder_ setDepthBias:bias_constant slopeScale:bias_slope clamp:0.0f];
++    }
+     [encoder_ setBlendColorRed:regs_.Get<float>(XE_GPU_REG_RB_BLEND_RED) green:regs_.Get<float>(XE_GPU_REG_RB_BLEND_GREEN)
+                         blue:regs_.Get<float>(XE_GPU_REG_RB_BLEND_BLUE) alpha:regs_.Get<float>(XE_GPU_REG_RB_BLEND_ALPHA)];
+     BuildMetalSystemConstants(regs_, primitive, viewport, system_bytes_, signs_.data(), param_gen_scale);
+@@ -1561,9 +1634,7 @@ id<MTLTexture> MetalDraw::ComposeResolves(uint32_t address, uint32_t width, uint
+       size_t offset = 0;
+       id<MTLBuffer> staging = Staging(size_t(width) * rows * bpb, offset);
+       if (!staging) { [compute endEncoding]; return nil; }
+-      struct {
+-        uint32_t src_base, slice_stride, row_pitch_bytes, pitch_blocks, log_bpp, ox, oy, tiled, xor_mask, bw, bh, convert;
+-      } c{address + g.y0 / 32 * macro_row_bytes, 0, macro_row_bytes / 32, macro_row_bytes / 32 / bpb,
++      TextureLoadConstants c{address + g.y0 / 32 * macro_row_bytes, 0, macro_row_bytes / 32, macro_row_bytes / 32 / bpb,
+           rex::log2_floor(bpb), 0, 0, 1, xor_mask, width, rows, 0};
+       [compute setBuffer:staging offset:offset atIndex:1];
+       [compute setBytes:&c length:sizeof(c) atIndex:2];
+@@ -1686,7 +1757,10 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+   uint32_t mip_address = 0;
+   const ResolvedTexture* resolved = nullptr;
+   id<MTLTexture> composite = nil;
+-  if (fetch.type == xenos::FetchConstantType::kTexture && fetch.dimension != xenos::DataDimension::k3D) {
++  // A 3D texture is loaded only for a 3D binding (FIFA 19 grades colour through 32x32x32 LUTs).
++  const bool volume_load = volume && fetch.dimension == xenos::DataDimension::k3D;
++  if (fetch.type == xenos::FetchConstantType::kTexture &&
++      (fetch.dimension != xenos::DataDimension::k3D || volume_load)) {
+     uint32_t w, h, layers, base, mip, lo, hi;
+     texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &layers, &base, &mip, &lo, &hi);
+     auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, fetch.pitch, w + 1, h + 1, layers + 1,
+@@ -1763,7 +1837,8 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+         levels:NSMakeRange(0, 1) slices:NSMakeRange(0, 1)];
+   } else if (composite) {
+     texture = composite;
+-  } else if (fetch.type == xenos::FetchConstantType::kTexture && !volume && REXCVAR_GET(metal_texture_loads)) {
++  } else if (fetch.type == xenos::FetchConstantType::kTexture && (!volume || volume_load) &&
++             REXCVAR_GET(metal_texture_loads)) {
+     auto format = GetBaseFormat(fetch.format);
+     MTLPixelFormat metal_format = MTLPixelFormatInvalid;
+     using F = xenos::TextureFormat;
+@@ -1794,11 +1869,18 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+     uint32_t w, h, layers, base_page, mip_page, mip_min, mip_max;
+     texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &layers, &base_page, &mip_page, &mip_min, &mip_max);
+     ++w; ++h; ++layers;
+-    if (metal_format != MTLPixelFormatInvalid && base_page && w <= 8192 && h <= 8192 && (!cube || w == h)) {
++    // A volume's depth is the grid's z, like an array's layers, but in one 3D image.
++    if (metal_format != MTLPixelFormatInvalid && base_page && w <= 8192 && h <= 8192 && (!cube || w == h) &&
++        (!volume_load || (layers <= 2048 && !load_mip_levels))) {
+       auto desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:metal_format width:w height:h mipmapped:NO];
+       desc.mipmapLevelCount = 1 + load_mip_levels;
+-      desc.textureType = cube ? MTLTextureTypeCube : MTLTextureType2DArray;
+-      desc.arrayLength = cube ? 1 : layers;
++      if (volume_load) {
++        desc.textureType = MTLTextureType3D;
++        desc.depth = layers;
++      } else {
++        desc.textureType = cube ? MTLTextureTypeCube : MTLTextureType2DArray;
++        desc.arrayLength = cube ? 1 : layers;
++      }
+       desc.storageMode = MTLStorageModePrivate; desc.usage = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
+       texture = [device_ newTextureWithDescriptor:desc];
+       if (texture) {
+@@ -1827,13 +1909,16 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+         if (!staging || !memory_buffer_) {
+           texture = nil;
+         } else {
+-          struct {
+-            uint32_t src_base, slice_stride, row_pitch_bytes, pitch_blocks, log_bpp, ox, oy, tiled, xor_mask, bw, bh, convert;
+-          } c{(base_page << 12) & 0x1FFFFFFF, layout.base.array_slice_stride_bytes, layout.base.row_pitch_bytes,
++          TextureLoadConstants c{(base_page << 12) & 0x1FFFFFFF, layout.base.array_slice_stride_bytes, layout.base.row_pitch_bytes,
+               layout.base.row_pitch_bytes / bpb, rex::log2_floor(bpb), ox, oy, fetch.tiled ? 1u : 0u,
+               fetch.endianness == xenos::Endian::k8in16 ? 1u : fetch.endianness == xenos::Endian::k8in32 ? 3u :
+                   fetch.endianness == xenos::Endian::k16in32 ? 2u : 0u,
+               bw, bh, convert};
++          if (volume_load) {
++            c.volume = 1;
++            c.slice_stride = layout.base.row_pitch_bytes * layout.base.z_slice_stride_block_rows;
++            c.height_blocks = layout.base.z_slice_stride_block_rows;
++          }
+           id<MTLCommandBuffer> cb = TextureWorkCommands();
+           auto compute = [cb computeCommandEncoder];
+           if (REXCVAR_GET(metal_debug_labels))
+@@ -1869,10 +1954,16 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+           }
+           [compute endEncoding];
+           auto blit = [cb blitCommandEncoder];
+-          for (uint32_t layer = 0; layer < layers; ++layer)
+-            [blit copyFromBuffer:staging sourceOffset:staging_offset + layer * image sourceBytesPerRow:bw * out_bpb sourceBytesPerImage:image
+-                sourceSize:MTLSizeMake(w, h, 1) toTexture:texture destinationSlice:layer destinationLevel:0
++          if (volume_load) {
++            [blit copyFromBuffer:staging sourceOffset:staging_offset sourceBytesPerRow:bw * out_bpb sourceBytesPerImage:image
++                sourceSize:MTLSizeMake(w, h, layers) toTexture:texture destinationSlice:0 destinationLevel:0
+                 destinationOrigin:MTLOriginMake(0, 0, 0)];
++          } else {
++            for (uint32_t layer = 0; layer < layers; ++layer)
++              [blit copyFromBuffer:staging sourceOffset:staging_offset + layer * image sourceBytesPerRow:bw * out_bpb
++                  sourceBytesPerImage:image sourceSize:MTLSizeMake(w, h, 1) toTexture:texture destinationSlice:layer
++                  destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
++          }
+           for (uint32_t level = 1; level <= load_mip_levels; ++level) {
+             const MipCopy& m = mip_copies[level];
+             for (uint32_t layer = 0; layer < layers; ++layer)
+@@ -1882,6 +1973,19 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+           }
+           [blit endEncoding];
+           ++texture_loads_;
++          // The levels a resolve may later land on exactly (metal_resolve_into_mips): uncompressed tiled 2D
++          // textures with mips, each level stored apart (not in the packed tail).
++          if (load_mip_levels && fetch.tiled && !cube && !volume_load && layers == 1 && info->block_width == 1 &&
++              info->block_height == 1) {
++            AddMipTarget(entry, texture, 0, c.src_base, w, h, layout.base.row_pitch_bytes / bpb, uint32_t(format),
++                         layout.base.level_data_extent_bytes);
++            for (uint32_t level = 1; level <= load_mip_levels && level < mip_layout.packed_level; ++level) {
++              const auto& lv = mip_layout.mips[level];
++              AddMipTarget(entry, texture, level, mip_address + mip_layout.mip_offsets_bytes[level],
++                           std::max(w >> level, 1u), std::max(h >> level, 1u), lv.row_pitch_bytes / bpb,
++                           uint32_t(format), lv.level_data_extent_bytes);
++            }
++          }
+         }
+       }
+     }
+@@ -2108,6 +2212,7 @@ bool MetalDraw::Resolve() {
+         [compute dispatchThreads:MTLSizeMake(width, height, 1) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+         [compute endEncoding];
+         uint32_t address = info.copy_dest_base & 0x1FFFFFFF;
++        resolve_since_fence_ = true;
+         uint32_t resolved_format = depth ? constants.format : uint32_t(info.copy_dest_info.copy_dest_format);
+         uint32_t resolved_pitch = info.copy_dest_coordinate_info.pitch_aligned_div_32 * 32u;
+         // Resolves side by side in one surface (a shadow atlas) cover the same macro tile rows of memory but not
+@@ -2122,7 +2227,10 @@ bool MetalDraw::Resolve() {
+               beside.emplace_back(a, r);
+           for (auto& [a, r] : beside) resolved_.erase(a);
+         }
+-        InvalidateRange(info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length);
++        if (constants.dx || constants.dy ||
++            !ResolveIntoMip(destination, address, width, height, resolved_pitch, resolved_format,
++                            info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length))
++          InvalidateRange(info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length);
+         for (auto& [a, r] : beside) resolved_.emplace(a, r);
+         if (constants.dx || constants.dy) Recycle(destination);  // kept by the command buffer until done
+         else
+diff --git a/src/graphics/metal/metal_internal.h b/src/graphics/metal/metal_internal.h
+index ddc1e33..20b7e3b 100644
+--- a/src/graphics/metal/metal_internal.h
++++ b/src/graphics/metal/metal_internal.h
+@@ -22,6 +22,7 @@
+ 
+ #import <Metal/Metal.h>
+ #import <QuartzCore/CAMetalLayer.h>
++@protocol MTLFXSpatialScaler;
+ 
+ #include <array>
+ #include <atomic>
+@@ -170,6 +171,14 @@ class MetalPresenter final : public ui::Presenter {
+   };
+   id<MTLCommandBuffer> EncodePaint(id<CAMetalDrawable> target, id<MTLTexture> image, const PaintPlacement& placement,
+                                    bool ui, const HdrOutputState& hdr_state);
++  // metal_present_upscale=metalfx: the guest output enlarged to the placement's size by MetalFX's spatial scaler
++  // (encoded into command_buffer), or nil to draw it bilinearly. Both paint threads use it, under the mutex.
++  id<MTLTexture> SpatialUpscale(id<MTLCommandBuffer> command_buffer, id<MTLTexture> image, uint32_t width,
++                                uint32_t height, bool hdr);
++  std::mutex spatial_mutex_;
++  id<MTLFXSpatialScaler> spatial_scaler_ = nil;
++  id<MTLTexture> spatial_output_ = nil;
++  bool spatial_unsupported_logged_ = false;
+   // Frame generation's present thread: the UI thread copies a new frame and the generated one before it into a
+   // slot of fg_copies_ ([0] generated, [1] the new frame) and leaves them to the thread, which waits for drawables
+   // (two a frame, more than the layer's three let the UI thread have without waiting) and presents them half the
+@@ -283,6 +292,14 @@ class MetalCommandProcessor final : public CommandProcessor {
+   uint64_t swaps_ = 0;
+   // The time between swaps (seconds, averaged): the motion blur's scale (metal_motion_blur_fps).
+   std::chrono::steady_clock::time_point last_swap_time_{};
++  // Stall reports (metal_hitch_log_ms, metal_stall_sample_ms): the last swap's time in host milliseconds for the
++  // watchdog thread, which samples every thread's stack once a stall passes the limit.
++  std::atomic<uint64_t> last_swap_ms_{0};
++  std::thread stall_watchdog_;
++  std::mutex stall_mutex_;
++  std::condition_variable stall_cv_;
++  bool stall_quit_ = false;
++  void StallWatchdog();
+   double frame_interval_ = 0.0;
+   uint64_t stats_draws_ = 0;
+   uint64_t stats_copies_ = 0;
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index de2ccd0..c1fd05b 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -39,6 +39,10 @@ REXCVAR_DEFINE_STRING(metal_present_capture, "", "GPU/Metal",
+ 
+ REXCVAR_DECLARE(std::string, hdr);
+ REXCVAR_DECLARE(int32_t, frame_generation_debug);
++REXCVAR_DEFINE_STRING(metal_present_upscale, "bilinear", "GPU/Metal",
++                      "How the guest's picture is enlarged to the window: bilinear, or metalfx (MetalFX's spatial "
++                      "upscaler, sharper; SDR output only, bilinear under HDR)")
++    .allowed({"bilinear", "metalfx"});
+ REXCVAR_DEFINE_BOOL(metal_hdr_auto_edr, true, "GPU/Metal",
+     "With hdr = auto: HDR output when the display can show extended dynamic range (EDR) at all (macOS has no HDR "
+     "switch; on a Mac the built-in displays and HDR monitors can)");
+@@ -704,11 +708,70 @@ void MetalPresenter::CapturePaint(id<MTLCommandBuffer> command_buffer, id<MTLTex
+   }];
+ }
+ 
++id<MTLTexture> MetalPresenter::SpatialUpscale(id<MTLCommandBuffer> command_buffer, id<MTLTexture> image,
++                                              uint32_t width, uint32_t height, bool hdr) {
++  // Only when enlarging (MetalFX's spatial scaler doesn't shrink) and for SDR (its perceptual mode expects
++  // gamma-encoded colour; PQ would need the HDR mode and a linear input).
++  if (hdr || REXCVAR_GET(metal_present_upscale) != "metalfx" || !image || width <= image.width ||
++      height <= image.height || width > 16384 || height > 16384)
++    return nil;
++  std::lock_guard<std::mutex> lock(spatial_mutex_);
++  if (!spatial_scaler_ || spatial_scaler_.inputWidth != image.width || spatial_scaler_.inputHeight != image.height ||
++      spatial_scaler_.outputWidth != width || spatial_scaler_.outputHeight != height ||
++      spatial_scaler_.colorTextureFormat != image.pixelFormat) {
++    spatial_scaler_ = nil;
++    spatial_output_ = nil;
++    if (![MTLFXSpatialScalerDescriptor supportsDevice:device_]) {
++      if (!spatial_unsupported_logged_) {
++        spatial_unsupported_logged_ = true;
++        REXGPU_WARN("Metal presenter: MetalFX spatial upscaling is not supported on this GPU; bilinear instead");
++      }
++      return nil;
++    }
++    MTLFXSpatialScalerDescriptor* desc = [MTLFXSpatialScalerDescriptor new];
++    desc.inputWidth = image.width;
++    desc.inputHeight = image.height;
++    desc.outputWidth = width;
++    desc.outputHeight = height;
++    desc.colorTextureFormat = image.pixelFormat;
++    desc.outputTextureFormat = image.pixelFormat;
++    desc.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
++    spatial_scaler_ = [desc newSpatialScalerWithDevice:device_];
++    if (!spatial_scaler_) {
++      REXGPU_WARN("Metal presenter: no MetalFX spatial scaler for {}x{} to {}x{}; bilinear instead", image.width,
++                  image.height, width, height);
++      return nil;
++    }
++    MTLTextureDescriptor* out = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:image.pixelFormat
++                                                                                   width:width
++                                                                                  height:height
++                                                                               mipmapped:NO];
++    out.usage = spatial_scaler_.outputTextureUsage | MTLTextureUsageShaderRead;
++    out.storageMode = MTLStorageModePrivate;
++    spatial_output_ = [device_ newTextureWithDescriptor:out];
++    spatial_output_.label = @"rexglue MetalFX spatial output";
++    REXGPU_INFO("Metal presenter: MetalFX spatial upscaling {}x{} to {}x{}", image.width, image.height, width,
++                height);
++  }
++  if (!spatial_output_) return nil;
++  spatial_scaler_.colorTexture = image;
++  spatial_scaler_.outputTexture = spatial_output_;
++  [spatial_scaler_ encodeToCommandBuffer:command_buffer];
++  return spatial_output_;
++}
++
+ id<MTLCommandBuffer> MetalPresenter::EncodePaint(id<CAMetalDrawable> target, id<MTLTexture> image,
+                                                  const PaintPlacement& placement, bool ui,
+                                                  const HdrOutputState& hdr_state) {
+   id<MTLCommandBuffer> command_buffer = [command_queue_ commandBuffer];
+   command_buffer.label = @"rexglue paint";
++  if (image && placement.draw) {
++    // Encoded before the paint's render pass; the pass then draws its output 1:1.
++    if (id<MTLTexture> upscaled = SpatialUpscale(command_buffer, image, uint32_t(placement.viewport.width),
++                                                 uint32_t(placement.viewport.height),
++                                                 target.texture.pixelFormat == MTLPixelFormatBGR10A2Unorm))
++      image = upscaled;
++  }
+   MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+   pass.colorAttachments[0].texture = target.texture;
+   pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+diff --git a/src/graphics/metal/metal_resolve.h b/src/graphics/metal/metal_resolve.h
+index f4f0471..5e7460a 100644
+--- a/src/graphics/metal/metal_resolve.h
++++ b/src/graphics/metal/metal_resolve.h
+@@ -174,9 +174,29 @@ kernel void resolve_depth_ms(depth2d_ms<float, access::read> source [[texture(0)
+   store_raw(uint4((d24 << 8) | (stencil.read(pixel, index).r & 0xFFu), 0, 0, 0), 2, p, c, memory, rejected);
+ }
+ // Guest texture memory to linear blocks, for a blit into the texture (any format, compressed too).
+-struct LoadConstants {
++struct LoadConstants {  // TextureLoadConstants in metal_draw.h
+   uint src_base, slice_stride, row_pitch_bytes, pitch_blocks, log_bpp, ox, oy, tiled, xor_mask, bw, bh, convert;
++  uint volume, height_blocks;
+ };
++// Xenos 3D tiling (texture_util::GetTiledOffset3D, from XGRAPHICS::TileVolume): slices in groups of
++// four, each group a 2D-like tiling of 32x16 macro tiles. pitch and height are in blocks, tile-aligned.
++uint tiled_offset_3d(uint3 p, uint pitch, uint height, uint log_bpp) {
++  uint macro_outer = ((p.y >> 4) + (p.z >> 2) * (height >> 4)) * (pitch >> 5);
++  uint macro = ((((p.x >> 5) + macro_outer) << (log_bpp + 6)) & 0xFFFFFFFu) << 1;
++  uint micro = (((p.x & 7) + ((p.y & 6) << 2)) << (log_bpp + 6)) >> 6;
++  uint offset_outer = ((p.y >> 3) + (p.z >> 2)) & 1;
++  uint offset1 = offset_outer + ((((p.x >> 3) + (offset_outer << 1)) & 3) << 1);
++  uint offset2 = ((macro + (micro & ~15u)) << 1) + (micro & 15) + ((p.z & 3) << (log_bpp + 6)) + ((p.y & 1) << 4);
++  uint address = (offset1 & 1) << 3;
++  address += (offset2 >> 6) & 7;
++  address <<= 3;
++  address += offset1 & ~1u;
++  address <<= 2;
++  address += offset2 & ~511u;
++  address <<= 3;
++  address += offset2 & 63;
++  return address;
++}
+ float float20e4_to_32(uint f24) {
+   f24 &= 0xFFFFFFu;
+   if (!f24) return 0.0f;
+@@ -191,9 +211,15 @@ kernel void load_texture(device const uchar* memory [[buffer(0)]], device uchar*
+     constant LoadConstants& c [[buffer(2)]], uint3 p [[thread_position_in_grid]]) {
+   if (p.x >= c.bw || p.y >= c.bh) return;
+   uint bpb = 1u << c.log_bpp;
+-  uint offset = c.tiled ? tiled_offset(uint2(p.x + c.ox, p.y + c.oy), c.pitch_blocks, c.log_bpp)
+-                        : (p.y + c.oy) * c.row_pitch_bytes + (p.x + c.ox) * bpb;
+-  uint src = c.src_base + p.z * c.slice_stride + offset;
++  uint src;
++  if (c.volume) {
++    src = c.src_base + (c.tiled ? tiled_offset_3d(uint3(p.x + c.ox, p.y + c.oy, p.z), c.pitch_blocks, c.height_blocks, c.log_bpp)
++                                : p.z * c.slice_stride + (p.y + c.oy) * c.row_pitch_bytes + (p.x + c.ox) * bpb);
++  } else {
++    uint offset = c.tiled ? tiled_offset(uint2(p.x + c.ox, p.y + c.oy), c.pitch_blocks, c.log_bpp)
++                          : (p.y + c.oy) * c.row_pitch_bytes + (p.x + c.ox) * bpb;
++    src = c.src_base + p.z * c.slice_stride + offset;
++  }
+   uint dst = ((p.z * c.bh + p.y) * c.bw + p.x) * (c.convert >= 3 ? 4u : bpb);
+   bool inside = src + bpb <= 0x20000000u;
+   if (c.convert >= 3) {
+-- 
+2.56.0
+

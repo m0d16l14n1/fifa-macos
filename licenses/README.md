@@ -1,12 +1,18 @@
-# License scope and third-party components
+# Licences
 
-The root MIT license applies to original project-authored installer, launcher and scripts. It does not relicense third-party components, copied SDK scaffolding or game material.
+| What | Licence |
+|---|---|
+| This project's own code: `src/`, `scripts/`, `launcher/`, `config/`, the build files | MIT ([`../LICENSE`](../LICENSE)) |
+| ReXGlue SDK (cloned by `scripts/sdk.sh`, not in git) | BSD 3-Clause, with Xenia's notice ([`ReXGlue-BSD-3-Clause.txt`](ReXGlue-BSD-3-Clause.txt)) |
+| `patches/mcla/`: the mcla-recomp patch series (RenanQueiroz and the mcla-recomp contributors) | GPL-3.0-or-later ([`GPL-3.0.txt`](GPL-3.0.txt)); parts ported from MIT projects are listed in [`mcla-recomp-THIRD-PARTY-NOTICES.md`](mcla-recomp-THIRD-PARTY-NOTICES.md) |
+| `patches/fifa/`: FIFA 19's changes to the SDK, on top of `patches/mcla/` | GPL-3.0-or-later, like the code they change |
 
-- ReXGlue and the local SDK patch: BSD 3-Clause; the upstream notice is in `ReXGlue-BSD-3-Clause.txt`, including its Xenia attribution.
-- The managed LZX decoder from MonoGame is used under Microsoft Public License (Ms-PL), one of its offered licenses. Its copyright/header is retained in `Installer/FifaStreetSetupTool/ThirdParty/LzxDecoder.cs`; the full notice is in `Installer/FifaStreetSetupTool/ThirdParty/MonoGame-LICENSE.txt`. It is not covered by the root MIT license.
-- LLVM, CMake, Ninja, extract-xiso, .NET and ReXGlue dependencies: preserve their own license files and notices when packaging them. The public installer must include the notices applicable to the exact bundled versions.
-- FIFA Street branding images, icon and screenshots: rights remain with their respective holders; these are not released under the project's MIT license.
+The SDK built from these patches, and any program linked with it, is under the GPL as a whole: whoever
+distributes a build has to offer its source under GPL-3.0-or-later.
 
-The repository excludes third-party compiled tools. The migrated v0.3.0 installer is distributed with an accompanying third-party notices archive. `bundled-tools/sources.json` records upstream notice sources, including LLVM 23.1.2, Ninja 1.13.2 and .NET 8.0.31 identified in the embedded release package. Existing ReXGlue dependency, CMake and MonoGame notices are retained. The packaging script includes this directory in subsequent packages; review and update these notices whenever tool versions change. These notices do not grant rights to the game, artwork or trademarks.
+`src/native_libc_hooks.cpp` and the codegen fixes in `patches/fifa/0001-*` come from ReStreet (FIFA Street 2012 for
+PC, MIT, SamuelitoDaVila and contributors), which this repository started as.
 
-The credit recipe records differences for local application to the user's game data. Original game archives and the original font are not included. Presentation images and screenshots are separate from the MIT code license.
+Nothing of FIFA 19 is in this repository. FIFA, EA SPORTS and the game's content belong to Electronic Arts; Xbox
+360 to Microsoft. This project is not affiliated with or endorsed by either, and its licences grant no rights to
+the game or to anything made from it.

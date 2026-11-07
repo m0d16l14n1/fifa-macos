@@ -1,0 +1,48 @@
+# A tour for bug mapping: pictures of the intro, title screen, menus, team select, the loading screen and a Kick
+# Off match (shots/<name>.ppm in the working folder), then quit. Timings as kickoff.txt.
+wait 8s
+shot 01-boot
+wait 12s
+shot 02-intro
+wait 15s
+shot 03-title
+press start
+wait 25s
+shot 04-main-menu
+press a
+wait 10s
+shot 05-kickoff
+press a
+wait 6s
+shot 06-sides
+press a
+wait 4s
+press a
+wait 14s
+shot 07-kits
+press a
+wait 3s
+press a
+wait 12s
+shot 08-loading
+wait 13s
+press a
+wait 8s
+press a
+wait 20s
+shot 09-prematch
+wait 25s
+press start
+wait 20s
+press a
+wait 3s
+press a
+wait 8s
+shot 10-match
+stick lx 0.7 3s
+wait 2s
+shot 11-match-play
+wait 10s
+shot 12-match-later
+log tour done
+quit

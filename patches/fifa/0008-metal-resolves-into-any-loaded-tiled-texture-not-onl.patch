@@ -1,0 +1,253 @@
+From 21cf8b67a9a78b835399cfc56261a8e69031262b Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 15:55:05 +0700
+Subject: [PATCH 08/14] metal: resolves into any loaded tiled texture, not only
+ mip levels
+
+FIFA 19 resolves into the corner of a 2048x2048 k_4_4_4_4 texture, and into
+targets whose fetched size is not a multiple of 8 (320x180 fetched, 320x184
+resolved). Neither matched a resolve exactly, so each resolve dropped the
+texture and the next fetch untiled it from memory again: about 10 texture
+loads a frame in a match, 8 MB for the large one. Every loaded tiled 2D level
+is now a target (several textures per address), and a resolve with the same
+pitch and format whose rectangle starts inside the level is blitted into it at
+its offset. metal_resolve_into_mips becomes metal_resolve_into_textures;
+metal_resolve_into_textures_log says why a resolve was not taken.
+---
+ src/graphics/metal/metal_draw.h  |  27 ++++---
+ src/graphics/metal/metal_draw.mm | 131 ++++++++++++++++++++-----------
+ 2 files changed, 98 insertions(+), 60 deletions(-)
+
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index 491020c..c0e11e5 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -371,22 +371,25 @@ class MetalDraw {
+   // what it wrote (same address, size and format). Guest memory is the truth for everything else.
+   struct ResolvedTexture { id<MTLTexture> texture; uint32_t start, length, width, height, format, pitch = 0; };
+   static bool ResolveFormatMatches(uint32_t resolved, uint32_t fetched);
+-  // A level of a loaded tiled texture with mips that a resolve may land on exactly (metal_resolve_into_mips),
+-  // by the level's guest address. The texture is checked against its entry's when used: a dropped or reloaded
+-  // entry makes it stale.
+-  struct MipTarget {
++  // A level of a loaded tiled texture that resolves may write into (metal_resolve_into_textures), by the level's
++  // guest address; several textures (other fetch constants) can share one. Checked against its entry when used:
++  // a dropped or reloaded entry makes it stale.
++  struct ResolveTarget {
+     TextureEntry* entry;
+     id<MTLTexture> texture;
+     uint32_t level, width, height, pitch, format, length;
+   };
+-  std::unordered_map<uint32_t, MipTarget> mip_targets_;
+-  uint64_t resolves_into_mips_ = 0;
+-  void AddMipTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address, uint32_t width,
+-                    uint32_t height, uint32_t pitch, uint32_t format, uint32_t length);
+-  // Copies a resolve into the level of a loaded texture it lands on exactly, keeping that texture; false when
+-  // there is none (the resolve then drops what it overlaps, as always).
+-  bool ResolveIntoMip(id<MTLTexture> destination, uint32_t address, uint32_t width, uint32_t height, uint32_t pitch,
+-                      uint32_t format, uint32_t extent_start, uint32_t extent_length);
++  std::unordered_multimap<uint32_t, ResolveTarget> resolve_targets_;
++  uint64_t resolves_into_textures_ = 0;
++  std::unordered_set<uint32_t> resolve_misses_logged_;
++  void AddResolveTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address, uint32_t width,
++                        uint32_t height, uint32_t pitch, uint32_t format, uint32_t length);
++  // Copies a resolve (its texture `destination`, written at dx, dy of the surface at `address`) into every loaded
++  // texture level at that address with the same tiled layout and format, keeping those textures, and drops what
++  // else it overlaps. False when no texture took it (the caller then drops everything it overlaps, as before).
++  bool ResolveIntoTextures(id<MTLTexture> destination, uint32_t address, uint32_t dx, uint32_t dy, uint32_t width,
++                           uint32_t height, uint32_t pitch, uint32_t format, uint32_t extent_start,
++                           uint32_t extent_length);
+   static bool TilesDisjoint(uint32_t a_address, uint32_t a_width, uint32_t a_height, uint32_t a_pitch, uint32_t a_format,
+                             uint32_t b_address, uint32_t b_width, uint32_t b_height, uint32_t b_pitch, uint32_t b_format);
+   id<MTLTexture> ComposeResolves(uint32_t address, uint32_t width, uint32_t height, uint32_t pitch, uint32_t macro_row_bytes,
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 202a263..bf19743 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -33,11 +33,14 @@ REXCVAR_DEFINE_BOOL(metal_gpu_fences_all, false, "GPU/Metal",
+ REXCVAR_DEFINE_BOOL(metal_resolve_to_memory, true, "GPU/Metal", "Resolves write guest memory (diagnostic: false keeps them on the GPU only)");
+ REXCVAR_DEFINE_BOOL(metal_draw_cpu_only, false, "GPU/Metal", "Draws stop after the primitive processor and the vertex snapshot (diagnostic)");
+ REXCVAR_DEFINE_BOOL(metal_texture_loads, true, "GPU/Metal", "Load textures from guest memory (diagnostic: false binds a blank texture)");
+-REXCVAR_DEFINE_BOOL(metal_resolve_into_mips, true, "GPU/Metal",
+-                    "A resolve that lands exactly on a level of a loaded texture with mips (same address, size, "
+-                    "pitch and format) is copied into that level, and the texture kept. FIFA 19 builds a "
+-                    "2048x2048 downsample chain level by level: each level dropped and reloaded the texture "
+-                    "(8 MB untiled per level). false: every resolve drops what it overlaps");
++REXCVAR_DEFINE_BOOL(metal_resolve_into_textures, true, "GPU/Metal",
++                    "A resolve into the memory of a loaded tiled texture (a level of it at the resolve's address, the "
++                    "same pitch and format) is copied into that texture on the GPU, which is kept. Otherwise the "
++                    "resolve drops it and the next fetch untiles it from memory again: FIFA 19 resolves into the "
++                    "corner of a 2048x2048 texture (8 MB) and into targets whose fetched size is not a multiple of 8 "
++                    "every frame. false: every resolve drops what it overlaps");
++REXCVAR_DEFINE_BOOL(metal_resolve_into_textures_log, false, "GPU/Metal",
++                    "Diagnostic: log (once per address) each resolve that no loaded texture took, and why");
+ REXCVAR_DEFINE_BOOL(metal_texture_mips, true, "GPU/Metal",
+                     "Load textures' mip levels and sample them with the fetch's mip filter and anisotropic "
+                     "filtering (anisotropic_override); false: the base level only, as before (shimmering "
+@@ -417,9 +420,9 @@ void MetalDraw::EndFrame() {
+         "{} vertex or index ranges ({} bytes) changed between two draws of a frame in 150 frames", thread_ms,
+         wait_us_ / 1000.0 / 150, snapshot_changed_, snapshot_changed_bytes_);
+     snapshot_changed_ = 0; snapshot_changed_bytes_ = 0;
+-    if (resolves_into_mips_) {
+-      REXGPU_INFO("Metal: {:.1f} resolves a frame copied into a loaded texture's mip level", resolves_into_mips_ / 150.0);
+-      resolves_into_mips_ = 0;
++    if (resolves_into_textures_) {
++      REXGPU_INFO("Metal: {:.1f} resolves a frame copied into loaded textures", resolves_into_textures_ / 150.0);
++      resolves_into_textures_ = 0;
+     }
+     REXGPU_INFO("Metal frame time: {:.1f} ms a frame, GPU busy {:.1f} ms, CPU waiting for the GPU {:.1f} ms; {:.1f} texture loads ({:.1f} made from resolves, {:.0f} rows loaded for them), {:.1f} resolve textures reused, "
+         "{:.1f} MB of vertices and indices hashed and {:.1f} MB copied ({:.0f} kept from earlier frames), {:.1f} MB of textures hashed ({:.1f} skipped by watches), "
+@@ -462,7 +465,7 @@ void MetalDraw::EndFrame() {
+       entry.texture = nil; entry.cached = false; entry.has_hash = false; entry.hash = 0; entry.checked_frame = 0;
+       entry.has_range = false;
+     }
+-    cached_textures_ = 0; range_index_.clear(); max_range_length_ = 0; views_.clear(); mip_targets_.clear();
++    cached_textures_ = 0; range_index_.clear(); max_range_length_ = 0; views_.clear(); resolve_targets_.clear();
+   }
+ }
+ void MetalDraw::DropTexture(TextureEntry& entry) {
+@@ -475,42 +478,74 @@ void MetalDraw::DropViews(id<MTLTexture> texture) {
+   if (!texture) return;
+   views_.erase(reinterpret_cast<uintptr_t>((__bridge void*)texture));
+ }
+-void MetalDraw::AddMipTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address,
+-                             uint32_t width, uint32_t height, uint32_t pitch, uint32_t format, uint32_t length) {
+-  if (!REXCVAR_GET(metal_resolve_into_mips) || !entry.watch) return;  // unwatched: rehashed, would reload anyway
+-  mip_targets_[address] = {&entry, texture, level, width, height, pitch, format, length};
+-}
+-bool MetalDraw::ResolveIntoMip(id<MTLTexture> destination, uint32_t address, uint32_t width, uint32_t height,
+-                               uint32_t pitch, uint32_t format, uint32_t extent_start, uint32_t extent_length) {
+-  if (!REXCVAR_GET(metal_resolve_into_mips)) return false;
+-  auto found = mip_targets_.find(address);
+-  if (found == mip_targets_.end()) return false;
+-  MipTarget& t = found->second;
+-  TextureEntry& entry = *t.entry;
+-  if (!entry.cached || entry.texture != t.texture) { mip_targets_.erase(found); return false; }
+-  // Exactly the level: its size, pitch and format, and no bytes outside it (a larger resolve covers other data).
+-  if (t.width != width || t.height != height || t.pitch != pitch || !ResolveFormatMatches(format, t.format) ||
+-      t.texture.pixelFormat != destination.pixelFormat || t.level >= t.texture.mipmapLevelCount ||
+-      extent_start < address || uint64_t(extent_start) + extent_length > uint64_t(address) + t.length)
++void MetalDraw::AddResolveTarget(TextureEntry& entry, id<MTLTexture> texture, uint32_t level, uint32_t address,
++                                 uint32_t width, uint32_t height, uint32_t pitch, uint32_t format, uint32_t length) {
++  if (!REXCVAR_GET(metal_resolve_into_textures) || !entry.watch) return;  // unwatched: rehashed, reloaded anyway
++  // One target per entry and level: a reload replaces the old texture's.
++  for (auto [i, e] = resolve_targets_.equal_range(address); i != e; ++i) {
++    if (i->second.entry == &entry && i->second.level == level) {
++      i->second = {&entry, texture, level, width, height, pitch, format, length};
++      return;
++    }
++  }
++  resolve_targets_.emplace(address, ResolveTarget{&entry, texture, level, width, height, pitch, format, length});
++}
++bool MetalDraw::ResolveIntoTextures(id<MTLTexture> destination, uint32_t address, uint32_t dx, uint32_t dy,
++                                    uint32_t width, uint32_t height, uint32_t pitch, uint32_t format,
++                                    uint32_t extent_start, uint32_t extent_length) {
++  if (!REXCVAR_GET(metal_resolve_into_textures)) return false;
++  const bool log = REXCVAR_GET(metal_resolve_into_textures_log);
++  const char* why = "no loaded texture at its address";
++  std::vector<ResolveTarget*> takers;
++  for (auto [i, e] = resolve_targets_.equal_range(address); i != e;) {
++    ResolveTarget& t = i->second;
++    if (!t.entry->cached || t.entry->texture != t.texture) {  // stale: the texture was dropped or reloaded
++      i = resolve_targets_.erase(i);
++      continue;
++    }
++    ++i;
++    // The same tiled layout (pitch) and format, the rectangle inside the level, and no bytes outside it.
++    if (t.pitch != pitch) why = "another pitch";
++    else if (!ResolveFormatMatches(format, t.format)) why = "another format";
++    else if (t.texture.pixelFormat != destination.pixelFormat) why = "another pixel format";
++    else if (t.level >= t.texture.mipmapLevelCount) why = "level not loaded";
++    else if (dx >= t.width || dy >= t.height) why = "outside the level";
++    else if (extent_start < address || uint64_t(extent_start) + extent_length > uint64_t(address) + t.length)
++      why = "writes outside the level";
++    else takers.push_back(&t);
++  }
++  if (takers.empty()) {
++    if (log && resolve_misses_logged_.insert(address).second)
++      REXGPU_INFO("Metal resolve into textures: {:08X} at {},{} {}x{} pitch {} format {} (extent {:08X}+{:X}) not "
++                  "copied: {}", address, dx, dy, width, height, pitch, format, extent_start, extent_length, why);
+     return false;
+-  // The texture stays: out of the range index while the resolve drops what else it overlaps, then back.
+-  const uint32_t range_start = entry.range_start, range_length = entry.range_length;
+-  const bool had_range = entry.has_range;
+-  if (had_range) {
+-    for (auto [i, e] = range_index_.equal_range(range_start); i != e; ++i)
++  }
++  // The textures stay: out of the range index while the resolve drops what else it overlaps, then back.
++  struct Kept { TextureEntry* entry; uint32_t start, length; };
++  std::vector<Kept> kept;
++  for (ResolveTarget* t : takers) {
++    TextureEntry& entry = *t->entry;
++    if (!entry.has_range) continue;
++    kept.push_back({&entry, entry.range_start, entry.range_length});
++    for (auto [i, e] = range_index_.equal_range(entry.range_start); i != e; ++i)
+       if (i->second.second == &entry) { range_index_.erase(i); break; }
+     entry.has_range = false;
+   }
+   InvalidateRange(extent_start, extent_length);
+-  if (had_range) SetTextureRange(entry, range_start, range_length);
++  for (const Kept& k : kept) SetTextureRange(*k.entry, k.start, k.length);
+   auto blit = [commands_ blitCommandEncoder];
+   if (REXCVAR_GET(metal_debug_labels))
+-    blit.label = [NSString stringWithFormat:@"resolve %ux%u into mip %u", width, height, t.level];
+-  [blit copyFromTexture:destination sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+-             sourceSize:MTLSizeMake(width, height, 1) toTexture:t.texture destinationSlice:0
+-       destinationLevel:t.level destinationOrigin:MTLOriginMake(0, 0, 0)];
++    blit.label = [NSString stringWithFormat:@"resolve %ux%u into %zu texture(s)", width, height, takers.size()];
++  for (ResolveTarget* t : takers) {
++    // A resolve's size is in whole 8x8 blocks: what lies past the level's edge is not copied.
++    const uint32_t w = std::min(width, std::min(uint32_t(destination.width), t->width - dx));
++    const uint32_t h = std::min(height, std::min(uint32_t(destination.height), t->height - dy));
++    [blit copyFromTexture:destination sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
++               sourceSize:MTLSizeMake(w, h, 1) toTexture:t->texture destinationSlice:0
++         destinationLevel:t->level destinationOrigin:MTLOriginMake(dx, dy, 0)];
++  }
+   [blit endEncoding];
+-  ++resolves_into_mips_;
++  ++resolves_into_textures_;
+   return true;
+ }
+ void MetalDraw::InvalidateRange(uint32_t start, uint32_t length) {
+@@ -1973,17 +2008,17 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+           }
+           [blit endEncoding];
+           ++texture_loads_;
+-          // The levels a resolve may later land on exactly (metal_resolve_into_mips): uncompressed tiled 2D
+-          // textures with mips, each level stored apart (not in the packed tail).
+-          if (load_mip_levels && fetch.tiled && !cube && !volume_load && layers == 1 && info->block_width == 1 &&
++          // The levels resolves may later write into (metal_resolve_into_textures): uncompressed tiled 2D
++          // textures, the base and each mip stored apart (not in the packed tail).
++          if (fetch.tiled && !cube && !volume_load && layers == 1 && info->block_width == 1 &&
+               info->block_height == 1) {
+-            AddMipTarget(entry, texture, 0, c.src_base, w, h, layout.base.row_pitch_bytes / bpb, uint32_t(format),
+-                         layout.base.level_data_extent_bytes);
++            AddResolveTarget(entry, texture, 0, c.src_base, w, h, layout.base.row_pitch_bytes / bpb,
++                             uint32_t(format), layout.base.level_data_extent_bytes);
+             for (uint32_t level = 1; level <= load_mip_levels && level < mip_layout.packed_level; ++level) {
+               const auto& lv = mip_layout.mips[level];
+-              AddMipTarget(entry, texture, level, mip_address + mip_layout.mip_offsets_bytes[level],
+-                           std::max(w >> level, 1u), std::max(h >> level, 1u), lv.row_pitch_bytes / bpb,
+-                           uint32_t(format), lv.level_data_extent_bytes);
++              AddResolveTarget(entry, texture, level, mip_address + mip_layout.mip_offsets_bytes[level],
++                               std::max(w >> level, 1u), std::max(h >> level, 1u), lv.row_pitch_bytes / bpb,
++                               uint32_t(format), lv.level_data_extent_bytes);
+             }
+           }
+         }
+@@ -2227,9 +2262,9 @@ bool MetalDraw::Resolve() {
+               beside.emplace_back(a, r);
+           for (auto& [a, r] : beside) resolved_.erase(a);
+         }
+-        if (constants.dx || constants.dy ||
+-            !ResolveIntoMip(destination, address, width, height, resolved_pitch, resolved_format,
+-                            info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length))
++        if (!ResolveIntoTextures(destination, address, constants.dx, constants.dy, width, height, resolved_pitch,
++                                 resolved_format, info.copy_dest_extent_start & 0x1FFFFFFF,
++                                 info.copy_dest_extent_length))
+           InvalidateRange(info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length);
+         for (auto& [a, r] : beside) resolved_.emplace(a, r);
+         if (constants.dx || constants.dy) Recycle(destination);  // kept by the command buffer until done
+-- 
+2.56.0
+

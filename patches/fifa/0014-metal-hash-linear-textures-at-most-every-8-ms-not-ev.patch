@@ -1,0 +1,71 @@
+From e70bd8c82a49ef0fa02509068d5315542871e878 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 17:23:22 +0700
+Subject: [PATCH 14/14] metal: hash linear textures at most every 8 ms, not
+ every guest frame
+
+Linear textures (the CPU's per-frame pictures: movie planes) are hashed
+instead of watched. At the 240 Hz pacing a 30 fps movie's planes (3.4 MB)
+were hashed 240 times a second on the command processor thread. They are
+taken as they are for metal_linear_hash_us (8000) after a hash, which still
+follows 60 fps content. The boot movie plays as before (timed, pictures).
+---
+ src/graphics/metal/metal_draw.h  |  2 ++
+ src/graphics/metal/metal_draw.mm | 14 ++++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index c0e11e5..dc25302 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -311,6 +311,8 @@ class MetalDraw {
+     bool cached = false;  // texture is current (until a resolve over its memory or the epoch drops it)
+     bool has_hash = false, has_range = false;
+     uint64_t hash = 0, checked_frame = 0;
++    // When an unwatched (linear) texture was last hashed, in steady-clock microseconds (metal_linear_hash_us).
++    int64_t hashed_us = 0;
+     uint32_t range_start = 0, range_length = 0;
+     std::unique_ptr<TextureWatch> watch;
+   };
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index bf19743..125d930 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -41,6 +41,11 @@ REXCVAR_DEFINE_BOOL(metal_resolve_into_textures, true, "GPU/Metal",
+                     "every frame. false: every resolve drops what it overlaps");
+ REXCVAR_DEFINE_BOOL(metal_resolve_into_textures_log, false, "GPU/Metal",
+                     "Diagnostic: log (once per address) each resolve that no loaded texture took, and why");
++REXCVAR_DEFINE_INT32(metal_linear_hash_us, 8000, "GPU/Metal",
++                     "A linear (CPU-written, unwatched) texture is hashed again at most this often (us). It was every "
++                     "guest frame: a 30 fps movie's planes, 3.4 MB, 240 times a second uncapped. 8 ms still follows "
++                     "60 fps content; 0 hashes every frame")
++    .range(0, 100000);
+ REXCVAR_DEFINE_BOOL(metal_texture_mips, true, "GPU/Metal",
+                     "Load textures' mip levels and sample them with the fetch's mip filter and anisotropic "
+                     "filtering (anisotropic_override); false: the base level only, as before (shimmering "
+@@ -1780,6 +1785,14 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+       return View(entry.texture, fetch.swizzle, cube);
+     }
+   }
++  // An unwatched texture hashed moments ago (an earlier frame) is taken as it is.
++  const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
++                             std::chrono::steady_clock::now().time_since_epoch()).count();
++  if (cached && !watch && entry.has_hash && now_us - entry.hashed_us < REXCVAR_GET(metal_linear_hash_us)) {
++    entry.checked_frame = frame_;
++    remember_range();
++    return View(entry.texture, fetch.swizzle, cube);
++  }
+   bool volume = binding.dimension == xenos::FetchOpDimension::k3DOrStacked;
+   uint32_t address = (fetch.base_address << 12) & 0x1FFFFFFF;
+   uint64_t content_hash = 0;
+@@ -1850,6 +1863,7 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+               uint32_t(fetch.format), w + 1, h + 1, watch ? "written" : "unwatched");
+         content_hash = XXH3_64bits(memory_.TranslatePhysical<const void*>(span_start), span_length);
+         texture_hashed_ += span_length;
++        entry.hashed_us = now_us;
+       }
+     }
+   }
+-- 
+2.56.0
+

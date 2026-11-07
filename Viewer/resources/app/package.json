@@ -1,7 +1,0 @@
-{
-  "name": "restreet-viewer",
-  "productName": "ReStreet Launcher",
-  "version": "1.0.0",
-  "description": "A plain window for the ReStreet launcher page (served on 127.0.0.1 by the launcher).",
-  "main": "main.js"
-}

@@ -1,0 +1,82 @@
+From a4a127b9e7f9149b4dd56a13d076e9a5baa703d4 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 15:12:30 +0700
+Subject: [PATCH 06/14] install: ship the codegen tool, Vulkan loader and
+ MoltenVK for RelWithDebInfo SDKs too
+
+Only Release installed them (and the package config mapped every consumer
+configuration to the Release tool), so a game configured against a
+RelWithDebInfo SDK failed: IMPORTED_LOCATION not set for rex::rexglue, then
+libvulkan.1.dylib missing at its post-build copy. They are installed for both
+optimized configurations and consumers take whichever is there.
+---
+ cmake/rexglueConfig.cmake.in | 10 ++++++----
+ cmake/rexglue_install.cmake  | 11 ++++++-----
+ 2 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/cmake/rexglueConfig.cmake.in b/cmake/rexglueConfig.cmake.in
+index ff7f132..6233f26 100644
+--- a/cmake/rexglueConfig.cmake.in
++++ b/cmake/rexglueConfig.cmake.in
+@@ -38,12 +38,14 @@ endif()
+ 
+ include("${CMAKE_CURRENT_LIST_DIR}/rexglueTargets.cmake")
+ 
+-# Only Release rexglue is installed, so every consumer config has to reach it.
++# Only optimized rexglue tools are installed (Release, RelWithDebInfo), so every consumer config has to reach
++# one: the first of the list the SDK was installed with.
+ if(TARGET rex::rexglue)
+     set_target_properties(rex::rexglue PROPERTIES
+-        MAP_IMPORTED_CONFIG_DEBUG Release
+-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+-        MAP_IMPORTED_CONFIG_MINSIZEREL Release)
++        MAP_IMPORTED_CONFIG_DEBUG "Release;RelWithDebInfo"
++        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo"
++        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;RelWithDebInfo"
++        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;RelWithDebInfo")
+ endif()
+ 
+ if(TARGET rex::runtime AND NOT TARGET rex::system)
+diff --git a/cmake/rexglue_install.cmake b/cmake/rexglue_install.cmake
+index d9a64eb..ec57b5a 100644
+--- a/cmake/rexglue_install.cmake
++++ b/cmake/rexglue_install.cmake
+@@ -51,11 +51,12 @@ install(TARGETS ${REXGLUE_INSTALL_TARGETS}
+     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+ )
+ 
+-# A Debug codegen tool runs an order of magnitude slower, so only Release ships.
++# A Debug codegen tool runs an order of magnitude slower, so only the optimized configurations ship it
++# (RelWithDebInfo too: an SDK built only that way still needs the tool for its games' codegen).
+ install(TARGETS rexglue
+     EXPORT rexglueTargets
+     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+-    CONFIGURATIONS Release
++    CONFIGURATIONS Release RelWithDebInfo
+ )
+ 
+ if(REXGLUE_INSTALL_FIDELITYFX_TARGETS)
+@@ -140,17 +141,17 @@ endif()
+ if(APPLE AND REXGLUE_USE_VULKAN)
+     install(FILES "$<TARGET_FILE:Vulkan::Loader>"
+         DESTINATION ${CMAKE_INSTALL_LIBDIR}
+-        CONFIGURATIONS Release
++        CONFIGURATIONS Release RelWithDebInfo
+         RENAME libvulkan.1.dylib
+     )
+     install(FILES "$<TARGET_FILE:MoltenVK::MoltenVK>"
+         DESTINATION ${CMAKE_INSTALL_LIBDIR}
+-        CONFIGURATIONS Release
++        CONFIGURATIONS Release RelWithDebInfo
+         RENAME libMoltenVK.dylib
+     )
+     install(FILES cmake/MoltenVK_icd.json
+         DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/icd.d
+-        CONFIGURATIONS Release
++        CONFIGURATIONS Release RelWithDebInfo
+     )
+ endif()
+ 
+-- 
+2.56.0
+
