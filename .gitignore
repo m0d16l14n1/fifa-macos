@@ -1,60 +1,31 @@
-# Game data and original executables
+# FIFA 19 (Xbox 360) for macOS. Nothing of the game is in git: bring your own copy.
+
+# The extracted game and original executables
+/game/
+/FIFA-19/
 *.iso
 *.xex
 *.xex.dll
 *.big
 *.bh
-private/
-GameData/
-FIFASTREET/
 
-# Generated guest source; retain only the CMake scaffolding helper
-**/generated/**
-!Installer/recomp-template/generated/
-!Installer/recomp-template/generated/rexglue.cmake
+# Code generated from the game by `rexglue codegen`
+/generated/
 
-# Local SDK/toolchain and build outputs
-ReXGlue/
-sdk/
-compiler/
-**/bin/
-**/obj/
-**/out/
+# The SDK checkout (built from patches/ by scripts/sdk.sh) and build outputs
+/third_party/
+/out/
 build/
-dist/
-.ci-inputs/
-publish/
-*.exe
-*.dll
-*.lib
-*.obj
-*.res
-*.pdb
-*.zip
-*.7z
+
+# Local agent tooling
+/agents/
+/skills/
+/.claude/
+
+# Per-user and OS files
+.DS_Store
 *.log
-*.log.native
-bundle.zip
-
-# Per-user files
-*.csproj.user
-*.suo
-.vs/
-settings.json
-*.bak
-Thumbs.db
-Desktop.ini
-
-# local backup copies
-*.bak_*
-*.before_*
 *.orig
+*.rej
 __pycache__/
 *.pyc
-/FIFA-19
-
-# FIFA 19 macOS port: extracted game files and the local SDK copy
-/fifa19/game/
-/fifa19/third_party/
-/agents
-/skills

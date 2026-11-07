@@ -1,131 +1,90 @@
-<div align="center">
+# FIFA 19 for macOS
 
-<img src="docs/images/project-icon.png" alt="ReStreet" width="64">
+The Xbox 360 FIFA 19 (title 454109F9), statically recompiled with [ReXGlue](https://github.com/rexglue/rexglue-sdk)
+and drawn natively with Metal on Apple silicon. It boots, goes through the menus and plays Kick Off matches at
+60 Hz in a window, with MetalFX upscaling to the window's size.
 
-# ReStreet — FIFA Street (2012) on PC
+**Bring your own game**: a Games on Demand package of FIFA 19. Nothing of the game is in this repository.
+Offline play only.
 
-**FIFA Street (2012) recompiled for Windows, with online play. Bring your own game.**
+## Quick start
 
-### Ported by: SamuelitoDaVila
+```bash
+bash scripts/make_mac.sh --god /path/to/454109F9/00007000/<package file>
+open "out/FIFA 19.app"            # the launcher; or: sh scripts/play_mac.sh
+```
 
-[**Download**](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest) · [Changelog](CHANGELOG.md) · [Known issues](docs/STATUS.md) · [Report a bug](https://github.com/samuelit0davila/fifa-street-pc-port/issues) · [Build from source](docs/BUILDING.md)
+The first build takes about an hour (the SDK once, then the game); [docs/BUILDING.md](docs/BUILDING.md) has the
+details. The first run shows the EA User Agreement and asks for a club; both are saved with the profile in
+`~/Library/Application Support/FIFA 19`.
 
-[![Website](https://img.shields.io/badge/Website-ReStreet-1f6feb?style=for-the-badge&logo=googlechrome&logoColor=white)](https://samuelit0davila.github.io/fifa-street-pc-port/)
-[![Discord](https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/CqjYMGKyy2)
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z3B428N88S)
-
-[![Latest release](https://img.shields.io/github/v/release/samuelit0davila/fifa-street-pc-port?include_prereleases&label=latest&style=flat-square)](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/samuelit0davila/fifa-street-pc-port/total?style=flat-square)](https://github.com/samuelit0davila/fifa-street-pc-port/releases)
-![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)
-
-</div>
-
-https://github.com/user-attachments/assets/eb97ba0b-2c44-4b54-a93f-65220b0c3d40
-
-## What is this
-
-ReStreet is a Windows PC version of FIFA Street (2012), made by recompiling the Xbox 360 game. It comes with a one-file installer, a launcher, and free online play on community servers (Europe and South America).
-
-You need your own copy of the game: an **Xbox 360 ISO of FIFA Street (2012)**. The ISO and the game files are not included.
-
-**Current version: 2.0.8 Online Beta.** Trailer and screenshots on the [website](https://samuelit0davila.github.io/fifa-street-pc-port/).
-
-## What's new in 2.0
-
-- **New graphics engine**, based on AnDr3zF's "Deck" port: sharper image and much higher frame rates (about 400 FPS in a match on the test PC). Direct3D 12 and Vulkan.
-- **Graphics options:** FSR 1, internal resolution up to 4x, aspect ratio, anisotropic filtering, ambient occlusion (SSAO / HBAO / GTAO), MSAA, FXAA and an FPS limit.
-- **Launcher social page:** who is online, friends and requests, chat, and **game rooms** that bring both players to the same lobby.
-- **In-game friends Guide:** press **F6** (or the Xbox button on a controller) to see your friends and invite them. Accept an invite with A / Space, decline with B / Shift.
-- **Brazilian Portuguese** translation by Eze_.
-- **Automatic updates:** the launcher finds new versions, checks them and installs them, keeping your name, server, settings and World Tour progress.
-
-**Latest fixes (2.0.4 – 2.0.8):** player names on shirts, Mac (CrossOver) audio, online sign-in with USB-C / HDMI network adapters, the new Re/STREET icon, keyboard controls (A / B and skill-move keys), online sign-in, crashes entering or during a match, ultrawide screens, older CPUs without AVX2, World Tour saves (OneDrive, "corrupt save", progress from 2.0.0 / 2.0.1), My Squad faces, Portuguese (PT-BR) in game, and achievements on Windows user names with accents.
-
-Full history: [CHANGELOG.md](CHANGELOG.md).
-
-## Download and install
-
-**New install**
-
-1. Download **ReStreet-2.0.8-Setup.exe** from the [latest release](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest). Optionally check it against the `.sha256` file next to it.
-2. Run it, choose your FIFA Street ISO, a folder, your online name and your server (Europe or South America).
-3. Open the launcher from the desktop shortcut and press **PLAY**.
-
-**Already have ReStreet?**
-
-- On **1.5.1 or newer**: open the launcher and press **Update**. That's it.
-- On an older version: run the setup and pick your ReStreet folder. No ISO is needed; saves, settings and your online name are kept.
-
-**Step-by-step guide (PDF, with pictures):** [English](docs/guides/ReStreet-Guide-EN.pdf) · [Português](docs/guides/ReStreet-Guide-PT.pdf) · [Español](docs/guides/ReStreet-Guide-ES.pdf) — install, update, launcher settings, friends and fixing problems.
-
-## System requirements
-
-Estimates from testing, not guarantees.
+## Documentation
 
 | | |
 |---|---|
-| System | Windows 10 or 11, 64-bit (Linux: see below) |
-| CPU | x86-64; a quad-core is safest |
-| GPU | Direct3D 12 or Vulkan with up-to-date drivers |
-| RAM | 8 GB |
-| Disk | about 12 GB free for a new install |
-| Game | Your own FIFA Street (2012) Xbox 360 ISO |
+| [docs/BUILDING.md](docs/BUILDING.md) | building, what is where, cleaning |
+| [docs/METAL.md](docs/METAL.md) | the Metal backend, FIFA's changes to it, MetalFX and Metal 4 status |
+| [docs/DEBUGGING.md](docs/DEBUGGING.md) | test runs, the dev pad, screenshots, logs, stall reports, reverse engineering |
+| [docs/PLAN.md](docs/PLAN.md) | milestones from here to a release |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | known issues and work items |
+| [patches/README.md](patches/README.md) | the SDK's patches |
+| [launcher/mac/README.md](launcher/mac/README.md) | the launcher |
 
-On a weaker PC, open **Graphics** in the launcher: use **1x** internal resolution and turn off ambient occlusion and MSAA.
+## Running
 
-## Linux (beta)
+`sh scripts/play_mac.sh` starts the build in a window, with the Metal HUD and a log (`run.log` in the build folder).
+`FIFA19_BACKGROUND=1` keeps the window from ever taking focus (test runs on a Mac in use). Options go to the game,
+for example `--fifa19_gpu_backend=vulkan` (MoltenVK, for comparison), `--fullscreen=true`,
+`--metal_present_upscale=bilinear`.
 
-ReStreet runs on Linux through Proton, with a native Linux launcher that also installs the game. No terminal and nothing to install with a package manager, so it also suits SteamOS. Tested on CachyOS with an AMD GPU: online play works; launcher rooms and friend invites are still being tested, and the Steam Deck has not been tested yet.
+## Controls
 
-**You need** Steam with any Proton installed (in Steam: Library → Tools → **Proton Experimental**). Proton-CachyOS, GE-Proton or `umu-launcher` also work if you have them.
+A controller works as is. The keyboard plays too, as pad one together with any controller. The layout follows
+FIFA's keyboard-only Classic layout on PC: arrows move, and W/A/S/D are the four face buttons. The game shows
+Xbox 360 button prompts; the pad column says which key that is.
 
-1. Download **ReStreet-Linux-launcher.tar.gz** from the [latest release](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest) and extract it anywhere (right-click → Extract, or `tar -xzf ReStreet-Linux-launcher.tar.gz`).
-2. Open the `Linux` folder and run **restreet-launcher**.
-3. The launcher sees that ReStreet is not installed yet and opens the setup: choose your FIFA Street ISO (it finds one in Downloads by itself), the install folder, your online name and server, then press **Install ReStreet**. It downloads the setup from the release, checks it and installs the game (5 to 15 minutes).
-4. Press **Play**. ReStreet is now in your applications menu and on your desktop.
+| Key | Pad | In a match | In menus |
+|---|---|---|---|
+| Arrow keys | Left stick | Move | Move the highlight |
+| S | A | Short pass / header; contain (hold) when defending | Accept |
+| A | X | Lob pass / cross / header; slide tackle | |
+| W | Y | Through ball; rush the goalkeeper out (hold) | |
+| D | B | Shoot / volley / header; tackle, push or pull | Back |
+| E | RT | Sprint | |
+| Q | LB | Change player; chip shot (Q+D), lobbed through ball (Q+W), player run | Previous tab |
+| C | RB | Finesse shot (C+D), driven pass (C+S); teammate contain (hold) | Next tab |
+| Z | LT | Protect the ball, jockey, slow dribble | |
+| Numpad 8/2/4/6, or I/K/J/L | Right stick | Skill moves | |
+| T | Right stick press (R3) | Flick up for volley; cover far post (hold) | |
+| F | Left stick press (L3) | | |
+| Shift + arrow keys | D-pad | Team tactics (up: attacking, down: defending; left/right: game plan) | Move the highlight |
+| Esc or Space | Start | Pause | "Press START" on the title screen |
+| Enter | A | | Accept |
+| Backspace | B | | Back |
+| Tab | Back | | |
 
-On the Steam Deck, do this in Desktop Mode. To play from Game Mode, add **ReStreet** to Steam with "Add a Non-Steam Game" (pick the `restreet-launcher` in your ReStreet folder's `Linux` folder, and do not set a Proton version for it: it is a Linux program).
+Notes:
 
-The launcher cannot update itself on Linux yet; each new release says how to update.
+- Combinations work as on a pad: hold the modifier key, then press the action key (C then D for a finesse shot).
+- Holding Shift turns the arrow keys into the D-pad, so the player stops while Shift is down.
+- The app keeps F3 (debug overlay), F4 (settings, which can change these keys), F7 and the backtick (console).
+- Each key is a cvar with a comma-separated list of keys, e.g. `--keybind_right_trigger=E,R`.
+  - The names are `keybind_a`, `_b`, `_x`, `_y`, `_left_shoulder`, `_right_shoulder`, `_left_trigger`,
+    `_right_trigger`, `_lstick_up` (and `_down`, `_left`, `_right`, `_press`), the same for `_rstick_*` and
+    `_dpad_*`, `_start` and `_back`.
+  - A bind like `Shift+Up` needs exactly that modifier held, and a bind without one needs none held. So Shift,
+    Ctrl and Alt can't be action keys by themselves.
+- `--mnk_mode=false` turns the keyboard off. The mouse isn't used: `--mnk_mouse=true` makes it the right stick.
 
-## Online play
+## Status
 
-- Free open beta on two servers: **Europe** and **South America**. Players, friends and leaderboards are per server.
-- Online modes, friend invites, launcher rooms and the News Feed work. Chat is in the launcher.
-- Your World Tour team is shown to other players on your server.
+- Kick Off matches play at 60 Hz on an M5; menus and the intro work. Other modes are untested (BACKLOG C2).
+- MetalFX spatial upscaling is on; temporal AA, temporal upscaling and frame interpolation wait for FIFA's camera
+  and depth to be found (BACKLOG T1-T5). Metal 4 is planned (PLAN M6).
+- Online features, XeKeys, media verification and XHttp are stubs.
 
-## Known limits (2.0)
+## Licence
 
-- No mouse for skill moves yet (the launcher hides that option on 2.0).
-- Vulkan can have small stutters, and on AMD cards it can crash in the driver; use Direct3D 12 there.
-- The game renders internally at 1280x720 and is scaled to your screen.
-- START + B also shows the game's own "leave this session?" question behind the launcher's; close it with A.
-- A launcher room does not pull a player out of another lobby; leave that lobby first.
-- Two copies of the game on the same PC can lose the connection after an invite (different PCs are fine).
-
-More details and what was tested: [docs/STATUS.md](docs/STATUS.md).
-
-## Reporting a problem
-
-[Open an issue](https://github.com/samuelit0davila/fifa-street-pc-port/issues) or ask on [Discord](https://discord.gg/CqjYMGKyy2) with:
-
-- your ReStreet version, Windows version, CPU, GPU and RAM;
-- the graphics API (Direct3D 12 or Vulkan) and your launcher settings;
-- what happened and how to repeat it;
-- the logs: **Open logs** in the launcher (`Binaries\Logs\fifastreet.log` and `launcher_settings.txt`), plus `Binaries\crash_motivo.txt` if the game crashed.
-
-Please do not upload ISOs or game files.
-
-## Credits and licence
-
-- **SamuelitoDaVila** — port, online services, launcher, installer, 2.0 integration and testing.
-- **AnDr3zF** — the "Deck" port that the 2.0 graphics engine is built on.
-- **Eze_** — Brazilian Portuguese translation.
-- **Emran_Ahm3d** — Windows build fixes, game-data discovery, FootballCompEng function boundaries, and the Discord Rich Presence integration.
-- Developed with assistance from ChatGPT, OpenAI Codex and Anthropic's Claude (Claude Code), directed and tested by SamuelitoDaVila.
-
-Thanks to [ReXGlue](https://github.com/rexglue/rexglue-sdk), [Xenia](https://github.com/xenia-project/xenia), [extract-xiso](https://github.com/XboxDev/extract-xiso), LLVM, CMake, Ninja, .NET and MonoGame. Country data: IP to country by [DB-IP.com](https://db-ip.com) (CC BY 4.0). See [CREDITS.md](CREDITS.md) and the [third-party notices](licenses/README.md).
-
-My original installer, launcher and scripts use the [MIT License](LICENSE). Third-party components keep their own licences. The installer includes generated game binaries; the MIT licence does not establish the right to redistribute them, and no legal clearance is claimed. FIFA Street, its game content, artwork and trademarks belong to their respective owners.
-
-This is an unofficial community project, with no affiliation to EA, Microsoft or Xbox.
+MIT for this project's own code; the SDK patches are GPL-3.0-or-later. See [licenses/](licenses/README.md) and
+[CREDITS.md](CREDITS.md). FIFA and EA SPORTS are trademarks of Electronic Arts; this project is not affiliated
+with or endorsed by EA or Microsoft.

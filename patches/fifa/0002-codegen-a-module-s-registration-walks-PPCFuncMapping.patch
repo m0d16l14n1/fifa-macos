@@ -1,0 +1,33 @@
+From 0b8e0591461773eea6d686f484d03b9cba057bd5 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 15:01:48 +0700
+Subject: [PATCH 2/9] codegen: a module's registration walks PPCFuncMappings
+
+One SetFunction call per function in a single body made clang spend over 30
+minutes on FIFA 19's CardsDLLzf.
+---
+ resources/templates/codegen/register_cpp.inja | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/resources/templates/codegen/register_cpp.inja b/resources/templates/codegen/register_cpp.inja
+index 0be31c4..08ea197 100644
+--- a/resources/templates/codegen/register_cpp.inja
++++ b/resources/templates/codegen/register_cpp.inja
+@@ -17,8 +17,12 @@ void ReXModule_Register(rex::runtime::IModuleRegistrar* registrar) {
+ {% else %}
+ void {{ project }}_RegisterFunctions(rex::runtime::IModuleRegistrar* registrar) {
+ {% endif %}
+-{% for fn in functions %}{% if not fn.below_code_base or fn.is_import %}  registrar->SetFunction({{ fn.address }}, {{ fn.name }});
+-{% endif %}{% endfor %}}
++  // Walks the table init_cpp emits: one SetFunction call per function in a single
++  // body made clang spend over 30 minutes on modules with ~100k functions.
++  for (const PPCFuncMapping* m = PPCFuncMappings; m->guest != 0; ++m) {
++    registrar->SetFunction(static_cast<uint32_t>(m->guest), m->host);
++  }
++}
+ 
+ {% if is_dll %}
+ // The runtime uses this baked layout for the dispatch table. It must match the
+-- 
+2.56.0
+

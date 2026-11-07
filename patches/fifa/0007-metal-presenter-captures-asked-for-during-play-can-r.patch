@@ -1,0 +1,31 @@
+From d96d83a69069b3804b15d7568621e6ae614fd4cf Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 15:21:35 +0700
+Subject: [PATCH 7/9] metal presenter: captures asked for during play can read
+ the drawable
+
+The layer was framebuffer-only unless metal_present_capture was set at start,
+so a capture set later (the dev pad's shot) wrote nothing. The paint now
+switches the layer while a capture path is set.
+---
+ src/graphics/metal/metal_presenter.mm | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index c1fd05b..724318d 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -992,6 +992,10 @@ ui::Presenter::PaintResult MetalPresenter::PaintAndPresentImpl(bool execute_ui_d
+ 
+     // A paint of this thread's own: after what the frame generation thread was given.
+     FgPresentWaitIdle();
++    // A capture asked for while the game runs (the dev pad's shot) needs drawables it can read back; the layer
++    // goes back to framebuffer-only (faster) once capturing stops.
++    const BOOL framebuffer_only = REXCVAR_GET(metal_present_capture).empty() ? YES : NO;
++    if (layer.framebufferOnly != framebuffer_only) layer.framebufferOnly = framebuffer_only;
+     id<CAMetalDrawable> drawable = [layer nextDrawable];
+     if (!drawable) {
+       return PaintResult::kNotPresented;
+-- 
+2.56.0
+

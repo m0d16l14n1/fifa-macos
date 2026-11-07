@@ -1,11 +1,13 @@
 # Credits
 
-- SamuelitoDaVila: project direction, port integration, installer, launcher and gameplay validation.
-- AnDr3zF: the "Deck" port that the ReStreet 2.0 graphics engine is built on.
-- Eze_: Brazilian Portuguese translation (heights and weights in cm and kg).
-- Emran_Ahm3d: investigation and fixes concerning Windows patch line endings, module-registration paths, game-data discovery, FootballCompEng function boundaries and Windows resource compilation.
-- ReXGlue, Xenia and XenonRecomp contributors: runtime, graphics and recompilation foundations; their respective licences and notices continue to apply.
-- extract-xiso, .NET and MonoGame contributors, and Microsoft Visual C++ runtime: installation and runtime components, subject to their respective terms.
-- ChatGPT, OpenAI Codex and Anthropic's Claude (Claude Code): development assistance under Samuel's direction.
+- **ReXGlue** and **Xenia** contributors: the recompiler, the runtime and the Xenos GPU emulation everything here
+  runs on.
+- **mcla-recomp** (RenanQueiroz and contributors): the native Metal backend, MetalFX, the macOS audio threads and
+  the other SDK patches in `patches/mcla/`.
+- **ReStreet** (SamuelitoDaVila, AnDr3zF, Emran_Ahm3d and contributors): FIFA Street 2012's port, the same EA
+  engine family. This repository started as it; the codegen fixes and the native C runtime routines come from it.
+- **ForzaHorizon1-ReImagined** (Dyotson) and **Xenia Canary/Edge**: fixes carried in the MCLA series (see
+  `licenses/mcla-recomp-THIRD-PARTY-NOTICES.md`).
+- **Anthropic's Claude (Claude Code)**: development assistance.
 
-FIFA Street, EA, Xbox, Microsoft, artwork and game content retain their respective ownership. Project credits and the MIT licence do not grant redistribution rights to game-derived binaries or third-party material.
+FIFA, EA SPORTS and the game's content belong to Electronic Arts. See [`licenses/`](licenses/README.md).
