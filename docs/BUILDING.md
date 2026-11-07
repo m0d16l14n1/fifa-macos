@@ -46,6 +46,7 @@ cmake --build out/build/mac-arm64-relwithdebinfo
 | `scripts/pad/` | dev pad scripts: title screen to a match, the benchmark, `match.sh` for any stadium/time/weather |
 | `launcher/mac/` | the SwiftUI launcher and the app bundler |
 | `patches/` | the SDK's patches ([`patches/README.md`](../patches/README.md)) |
+| `tests/sdk/` | checks of SDK behaviour the game depends on, run by `bash scripts/test_sdk.sh` |
 | `third_party/rexglue-sdk` | the SDK checkout (not in git) |
 | `game/` | your extracted game (not in git) |
 | `out/` | builds, logs (`out/logs`), benchmark results (`out/bench`) |

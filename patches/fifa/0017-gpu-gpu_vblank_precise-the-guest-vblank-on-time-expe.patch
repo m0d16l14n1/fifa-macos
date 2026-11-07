@@ -1,0 +1,48 @@
+From 7e4d95329effcc6ecd8f5543f28f69f67acdc129 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 21:04:57 +0700
+Subject: [PATCH] gpu: gpu_vblank_precise, the guest vblank on time
+ (experimental, off)
+
+The vsync worker checks the clock every 1+ ms, so each vblank comes up
+to a millisecond late and the interval between two varies by as much: a
+quarter of a frame at 240 Hz. With gpu_vblank_precise it sleeps to the
+next vblank (in steps of at most 1 ms). One quiet 60 Hz match gave p99
+16.8 ms (17.7 polled); on a loaded machine it missed more vblanks than
+the polling, so it is off until measured over more runs.
+---
+ src/graphics/graphics_system.cpp | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index e00560b..48f9f91 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -35,6 +35,9 @@ REXCVAR_DEFINE_STRING(swap_post_effect, "none", "GPU", "Swap post effect: none,
+     .allowed({"none", "fxaa", "fxaa_extreme"})
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
++REXCVAR_DEFINE_BOOL(gpu_vblank_precise, false, "GPU",
++                    "Experimental: the guest vblank on time (the vsync worker sleeps to the next vblank). Off: it "
++                    "checks the clock every 1+ ms, and each vblank comes up to a millisecond late");
+ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                     "Store shaders persistently and load them when loading games to avoid "
+                     "runtime spikes and freezes when playing the game not for the first time.");
+@@ -176,7 +179,13 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+             last_frame_time += interval_ticks;
+             behind -= int64_t(interval_ticks);
+           }
+-          rex::thread::Sleep(std::chrono::milliseconds(1));
++          // Sleep to the next vblank (in steps of at most 1 ms, so a vsync change applies soon), not a fixed
++          // millisecond: polled every 1+ ms, each vblank came up to a millisecond late and the interval between
++          // two of them varied by as much, a quarter of a frame at 240 Hz.
++          const uint64_t until_next_us =
++              (interval_ticks - uint64_t(behind)) * 1'000'000 / std::max<uint64_t>(guest_tick_frequency, 1);
++          rex::thread::Sleep(std::chrono::microseconds(
++              REXCVAR_GET(gpu_vblank_precise) ? std::clamp<uint64_t>(until_next_us, 20, 1000) : 1000));
+         }
+         return 0;
+       }));
+-- 
+2.56.0
+

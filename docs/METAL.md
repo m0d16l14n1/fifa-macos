@@ -65,6 +65,7 @@ What made matches fast (from 26-39 ms a frame before):
 |---|---|---|
 | `video_mode_refresh_rate` | 240 (FIFA) | the guest's vblank clock: 240 uncapped, 60 as on the console |
 | `vsync` | on | off: the vblank every millisecond (unlimited, uneven) |
+| `gpu_vblank_precise` | off | experimental: the guest vblank on time instead of checked every 1+ ms (BACKLOG P9) |
 | `gpu_wait_poll_us` | 100 | WAIT_REG_MEM polling interval after 50 us of yielding |
 | `metal_present_upscale` | `metalfx` | `bilinear` to compare |
 | `metal_gpu_fences` / `metal_gpu_fences_all` | on / off | see above |
