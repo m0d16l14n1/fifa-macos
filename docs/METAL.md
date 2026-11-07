@@ -38,11 +38,13 @@ Measured on an M5 MacBook Air, Kick Off match, background window, Metal HUD on (
 | Mode | Settings | Match | Menus | Even? |
 |---|---|---|---|---|
 | Uncapped (default) | `video_mode_refresh_rate=240`, `vsync=true` | ~80 FPS (p50 12 ms) | ~115 FPS | yes: frames on a 4 ms grid |
-| Console | `video_mode_refresh_rate=60` | 58.6 FPS (p99 18.3 ms) | 60 | yes (BACKLOG P1: 17.07 ms, not 16.67) |
+| Console | `video_mode_refresh_rate=60` | 60.0 FPS (p50 16.67 ms, p99 17.7 ms) | 60 | yes (vblanks up to 1 ms late: BACKLOG P9) |
 | Unlimited | `vsync=false` (the guest's vblank every 1 ms) | ~85-90 FPS | | no: p95 17-19 ms at an 11 ms median |
 
 The game paces its frames by the guest's vblank interrupt, so raising that clock is the smooth way to uncap it.
 FIFA's simulation is time-based: the match clock runs 73 game seconds per 10 s at 60 and at 240 Hz alike.
+The guest clock is exact since `patches/fifa/0015`: before it, each read rounded down and the game, which reads
+the clock in a spin, ran 4% slow (60 Hz frames every 17.07 ms, movies 8.5 s for 8.17).
 The presenter still shows whole frames in step with the display (no tearing).
 
 What made matches fast (from 26-39 ms a frame before):

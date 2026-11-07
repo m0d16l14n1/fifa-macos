@@ -34,6 +34,7 @@ on its own, as a patch in `fifa/`, after it has been tested in FIFA.
 | `0012` thread priorities (macOS) | Threads are created QoS user-interactive; a guest priority is a Mach precedence, never `SCHED_FIFO`. The POSIX scale (normal = 16) as a fixed FIFO priority put the game's threads below every ordinary thread on the Mac (31). |
 | `0013` WAIT_REG_MEM with vsync off | The short-sleep polling of 0009 also when uncapped (it spun, taking a core from the threads it waited for). |
 | `0014` linear texture hashing | CPU-written (linear) textures are re-hashed at most every 8 ms (`metal_linear_hash_us`), not every guest frame: a 30 fps movie's planes were hashed 240 times a second at the 240 Hz pacing. |
+| `0015` guest clock remainder | The guest time base (50 MHz) is advanced from the host's (24 MHz on Apple silicon) with the fraction carried between updates. Each update rounded down, and a game polling the clock in a spin lost part of a tick every read: 0.96 guest seconds per real second, so FIFA's 60 Hz vblank came every 17.07 ms and everything timed by the guest ran 4% slow. |
 
 ## Changing the SDK
 
