@@ -1,0 +1,122 @@
+From a5e5d044c991c504c0d244327107d959376c4f15 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 00:37:40 +0700
+Subject: [PATCH 18/20] metal: cheaper cut-scenes: MSAA 2x as 1x, static linear
+ textures hashed less
+
+FIFA 19's walk-out and replays draw their scene at MSAA 2x in two
+predicated tiles, kept in samples (1x2): 1280x1440 pixels shaded a
+frame, a third of the GPU's time. metal_2x_as_1x (default on) draws a 2x
+surface at one sample a pixel, as metal_4x_as_1x does for 4x: the
+scene's fragment time per second fell by 44%. (metal_msaa, real
+multisample textures, was slower: the translator shades per sample.)
+
+Linear textures are hashed every metal_linear_hash_us since their write
+watch can miss writes; the walk-out hashed 27 MB of static ones a frame,
+10% of the command processor. A texture found unchanged now waits twice
+as long before its next hash, up to metal_linear_hash_max_us (100 ms); a
+change brings it back to 8 ms, so movies are hashed as before. 5-8 MB a
+frame in the walk-out now.
+
+A texture cache flush (over 4096 cached) is logged.
+---
+ src/graphics/metal/metal_draw.h  |  4 +++-
+ src/graphics/metal/metal_draw.mm | 24 ++++++++++++++++++++++--
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index dc25302..b0644ab 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -311,8 +311,10 @@ class MetalDraw {
+     bool cached = false;  // texture is current (until a resolve over its memory or the epoch drops it)
+     bool has_hash = false, has_range = false;
+     uint64_t hash = 0, checked_frame = 0;
+-    // When an unwatched (linear) texture was last hashed, in steady-clock microseconds (metal_linear_hash_us).
++    // When an unwatched (linear) texture was last hashed, in steady-clock microseconds (metal_linear_hash_us), and
++    // how many hashes in a row found it unchanged (each doubles the wait before the next, metal_linear_hash_max_us).
+     int64_t hashed_us = 0;
++    uint32_t unchanged_hashes = 0;
+     uint32_t range_start = 0, range_length = 0;
+     std::unique_ptr<TextureWatch> watch;
+   };
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 125d930..0b6a2ca 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -46,6 +46,12 @@ REXCVAR_DEFINE_INT32(metal_linear_hash_us, 8000, "GPU/Metal",
+                      "guest frame: a 30 fps movie's planes, 3.4 MB, 240 times a second uncapped. 8 ms still follows "
+                      "60 fps content; 0 hashes every frame")
+     .range(0, 100000);
++REXCVAR_DEFINE_INT32(metal_linear_hash_max_us, 100000, "GPU/Metal",
++                     "A linear texture found unchanged waits twice as long before its next hash, up to this (us): the "
++                     "walk-out hashed 27 MB of static linear textures a frame (10% of the command processor). A "
++                     "change brings it back to metal_linear_hash_us, so movies are hashed as before; a static one "
++                     "that changes is seen within this long. 0: always metal_linear_hash_us")
++    .range(0, 1000000);
+ REXCVAR_DEFINE_BOOL(metal_texture_mips, true, "GPU/Metal",
+                     "Load textures' mip levels and sample them with the fetch's mip filter and anisotropic "
+                     "filtering (anisotropic_override); false: the base level only, as before (shimmering "
+@@ -81,6 +87,11 @@ REXCVAR_DEFINE_BOOL(metal_4x_as_1x, true, "GPU/Metal",
+     "MSAA 4x surfaces (the reflections) drawn at one sample a pixel instead of 2x2 supersampling: a quarter of their "
+     "pixel work, without their anti-aliasing (+5% FPS with MSAA 2x, +16% with MetalFX Performance)")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_BOOL(metal_2x_as_1x, true, "GPU/Metal",
++    "MSAA 2x surfaces drawn at one sample a pixel instead of 1x2 supersampling: half their pixel work, without their "
++    "anti-aliasing. FIFA 19's cut-scenes and replays draw their scene at 2x in two predicated tiles (1280x1440 "
++    "pixels shaded a frame: 10 ms of the GPU's 33 in the walk-out)")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_BOOL(metal_pass_merge, true, "GPU/Metal",
+     "A draw that uses some of the open render pass's targets (no depth, or fewer colors) goes into that pass instead of starting its own");
+ REXCVAR_DEFINE_BOOL(metal_compose_resolves, true, "GPU/Metal",
+@@ -465,6 +476,7 @@ void MetalDraw::EndFrame() {
+     REXGPU_INFO("Metal debug capture: frame {}", frame_);
+   }
+   if (cached_textures_ > 4096) {
++    REXGPU_INFO("Metal textures: {} cached, all dropped (texture epoch {})", cached_textures_, texture_epoch_ + 1);
+     ++texture_epoch_;
+     for (auto& [key, entry] : texture_entries_) {
+       entry.texture = nil; entry.cached = false; entry.has_hash = false; entry.hash = 0; entry.checked_frame = 0;
+@@ -649,6 +661,7 @@ void MetalDraw::SurfaceSamples(xenos::MsaaSamples msaa, uint32_t& samples, bool&
+   samples = 1; multisample = false;
+   if (n > 1 && REXCVAR_GET(metal_msaa)) { samples = n; multisample = true; }
+   else if (n == 4 && REXCVAR_GET(metal_4x_as_1x)) samples = 4;
++  else if (n == 2 && REXCVAR_GET(metal_2x_as_1x)) samples = 2;
+ }
+ void MetalDraw::TargetKey(std::string& key, uint32_t base, MTLPixelFormat format, uint32_t width, bool is_64bpp,
+                           uint32_t samples, bool multisample) {
+@@ -1788,7 +1801,11 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+   // An unwatched texture hashed moments ago (an earlier frame) is taken as it is.
+   const int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              std::chrono::steady_clock::now().time_since_epoch()).count();
+-  if (cached && !watch && entry.has_hash && now_us - entry.hashed_us < REXCVAR_GET(metal_linear_hash_us)) {
++  int64_t hash_interval_us = REXCVAR_GET(metal_linear_hash_us);
++  if (REXCVAR_GET(metal_linear_hash_max_us) > hash_interval_us)
++    hash_interval_us = std::min<int64_t>(hash_interval_us << std::min<uint32_t>(entry.unchanged_hashes, 16),
++                                         REXCVAR_GET(metal_linear_hash_max_us));
++  if (cached && !watch && entry.has_hash && now_us - entry.hashed_us < hash_interval_us) {
+     entry.checked_frame = frame_;
+     remember_range();
+     return View(entry.texture, fetch.swizzle, cube);
+@@ -1864,6 +1881,8 @@ id<MTLTexture> MetalDraw::TextureSlow(const MetalTextureBinding& binding) {
+         content_hash = XXH3_64bits(memory_.TranslatePhysical<const void*>(span_start), span_length);
+         texture_hashed_ += span_length;
+         entry.hashed_us = now_us;
++        entry.unchanged_hashes = cached && entry.has_hash && entry.hash == content_hash
++            ? std::min<uint32_t>(entry.unchanged_hashes + 1, 16) : 0;
+       }
+     }
+   }
+@@ -3301,7 +3320,8 @@ id<MTLTexture> MetalDraw::HdrTarget(uint32_t key, uint32_t& kind) {
+   if (format != xenos::ColorRenderTargetFormat::k_8_8_8_8 || !pitch) return nil;
+   uint32_t samples; bool multisample;
+   SurfaceSamples(msaa, samples, multisample);
+-  // Only targets kept in pixels: 1x, and 4x as 1x (metal_4x_as_1x). A 2x target is kept in samples (1x2).
++  // Only targets kept in pixels: 1x, and 2x or 4x as 1x (metal_2x_as_1x, metal_4x_as_1x). Otherwise a 2x target is
++  // kept in samples (1x2).
+   if (multisample || (msaa != xenos::MsaaSamples::k1X && samples == 1)) return nil;
+   std::string target_key;
+   TargetKey(target_key, key & 0xFFF, ColorFormat(format), pitch, false, samples, multisample);
+-- 
+2.56.0
+

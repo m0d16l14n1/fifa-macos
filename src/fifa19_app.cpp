@@ -79,10 +79,16 @@ static void SetMetalDefaults() {
       {"metal_present_upscale", "metalfx"},
       // A stall of 2 s leaves every thread's stack in stall-<time>.txt in the working folder.
       {"metal_stall_sample_ms", "2000"},
+      // Smooth: the guest vblank on each refresh of the display, so every refresh shows the next game frame (a
+      // match on a 60 Hz screen: 60.1 frames shown a second, none repeated or dropped, each 16.7 ms of game time
+      // +-0.7 ms). Paced by its own 240 Hz clock the game made ~80 frames a second at uneven times and each
+      // refresh showed the newest: motion stepped 12 to 24 ms a refresh, which shows as judder on the crowd.
+      // false: video_mode_refresh_rate's clock (uncapped at 240).
+      {"gpu_vblank_display_sync", "true"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (!rex::cvar::SetDefaultValue(name, value)) {
-      REXLOG_WARN("fifa19: no Metal default for {} (another GPU backend?)", name);
+      REXLOG_WARN("fifa19: no GPU default for {} (another GPU backend?)", name);
     }
   }
 }
@@ -92,11 +98,10 @@ void Fifa19App::OnPreSetup(rex::RuntimeConfig& config) {
   SetKeyboardDefaults();
   // A window by default (the SDK starts fullscreen); fullscreen=true in fifa19.toml or on the command line.
   rex::cvar::SetDefaultValue("fullscreen", "false");
-  // Uncapped, smoothly: the game paces its frames by the guest's vblank, and that clock runs at 240 Hz instead of
-  // the console's 60, so frames come as fast as the game makes them (about 80 a second in a match on an M5) on an
-  // even 4 ms grid. FIFA's simulation is time-based: the match clock runs at the same rate as at 60 Hz (measured).
-  // vsync=false (the vblank every millisecond) is faster still but uneven; video_mode_refresh_rate=60 is the
-  // console's cap.
+  // The guest vblank's own clock when it isn't synced to the display (gpu_vblank_display_sync=false, below): 240 Hz
+  // instead of the console's 60, so frames come as fast as the game makes them (about 80 a second in a match on an
+  // M5). FIFA's simulation is time-based: the match clock runs at the same rate as at 60 Hz (measured).
+  // vsync=false (the vblank every millisecond) is faster still but uneven.
   rex::cvar::SetDefaultValue("video_mode_refresh_rate", "240");
   if (config.gpu_plugin.empty()) {
     config.gpu_plugin = "xenos";

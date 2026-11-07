@@ -8,6 +8,7 @@
 //   trigger lt|rt <0..1> [duration]     stick lx|ly|rx|ry <-1..1> [duration]
 //   release                    wait <duration>              log <text>        quit
 //   set <cvar> <value>          shot <name>   (the next presented frame to <fifa19_shot_dir>/<name>.ppm)
+//   burst <name> <count>        (that many consecutive presented frames, <name>-000.ppm on: flicker)
 //
 // Buttons: a b x y lb rb back start ls rs up down left right. Durations: 500ms, 2s, 1.5s.
 // The pipe: `mkfifo pad; ./fifa19 --fifa19_pad_pipe=pad`, then `echo "press start" > pad`.
@@ -259,6 +260,28 @@ bool Execute(const std::string& line) {
     Sleep(std::chrono::milliseconds(2200));
     rex::cvar::SetFlagByName("metal_present_capture", "");
     REXLOG_INFO("dev pad: shot {}", path);
+    return true;
+  }
+  if (cmd == "burst") {
+    // Consecutive presented frames (metal_present_capture_burst), for what shows for a frame or two only.
+    const int count = std::atoi(b.c_str());
+    if (a.empty() || a.find('/') != std::string::npos || count <= 0 || count > 600) {
+      REXLOG_WARN("dev pad: burst needs a plain name and a count (1..600), not '{} {}'", a, b);
+      return false;
+    }
+    const std::string dir = REXCVAR_GET(fifa19_shot_dir);
+    std::error_code error;
+    std::filesystem::create_directories(dir, error);
+    const std::string path = (std::filesystem::path(dir) / (a + ".ppm")).string();
+    rex::cvar::SetFlagByName("metal_present_capture_burst", std::to_string(count));
+    rex::cvar::SetFlagByName("metal_present_capture", path);
+    // Until the presenter has counted the burst down (frames are written as they complete), at most 30 s.
+    // (The cvar is the GPU plugin's, loaded at run time: read by name.)
+    auto burst_left = [] { return std::atoi(rex::cvar::GetFlagByName("metal_present_capture_burst").c_str()); };
+    for (int waited = 0; waited < 300 && burst_left() > 0; ++waited) Sleep(std::chrono::milliseconds(100));
+    Sleep(std::chrono::milliseconds(500));
+    rex::cvar::SetFlagByName("metal_present_capture", "");
+    REXLOG_INFO("dev pad: burst of {} frames to {}", count, path);
     return true;
   }
   if (cmd == "quit") {

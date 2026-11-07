@@ -33,19 +33,36 @@ FIFA 19 is drawn by the SDK's native Xenos-on-Metal backend (`src/graphics/metal
 
 ## Frame rate and pacing
 
-Measured on an M5 MacBook Air, Kick Off match, background window, Metal HUD on (2026-11-07):
+Measured on an M5 MacBook Air (60 Hz display), Kick Off, background window, Metal HUD on (2026-11-08). "Shown" is
+what reaches the screen (`present_log`, `scripts/present_stats.py`); the motion step is how much game time the
+picture advances by from one refresh to the next, the thing the eye reads as smooth or juddery.
 
-| Mode | Settings | Match | Menus | Even? |
+| Mode | Settings | Match | Shown on a 60 Hz screen | Motion step a refresh |
 |---|---|---|---|---|
-| Uncapped (default) | `video_mode_refresh_rate=240`, `vsync=true` | ~80 FPS (p50 12 ms) | ~115 FPS | yes: frames on a 4 ms grid |
-| Console | `video_mode_refresh_rate=60` | 60.0 FPS (p50 16.67 ms, p99 17.7 ms) | 60 | yes (vblanks up to 1 ms late: BACKLOG P9) |
-| Unlimited | `vsync=false` (the guest's vblank every 1 ms) | ~85-90 FPS | | no: p95 17-19 ms at an 11 ms median |
+| Synced to the display (default) | `gpu_vblank_display_sync=true` | 60.0 FPS | 60.0/s, none repeated or dropped | 16.66 ms +-0.37 |
+| Uncapped | `gpu_vblank_display_sync=false` (`video_mode_refresh_rate=240`) | ~80 FPS | 59.8/s, ~20 made a second never shown | 11.7-24 ms (+-3.6) |
+| Console clock | `gpu_vblank_display_sync=false`, `video_mode_refresh_rate=60` | 60 FPS | repeats and drops where the two clocks drift | uneven |
+| Unlimited | `gpu_vblank_display_sync=false`, `vsync=false` | ~85-90 FPS | | uneven |
 
-The game paces its frames by the guest's vblank interrupt, so raising that clock is the smooth way to uncap it.
-FIFA's simulation is time-based: the match clock runs 73 game seconds per 10 s at 60 and at 240 Hz alike.
-The guest clock is exact since `patches/fifa/0015`: before it, each read rounded down and the game, which reads
-the clock in a spin, ran 4% slow (60 Hz frames every 17.07 ms, movies 8.5 s for 8.17).
-The presenter still shows whole frames in step with the display (no tearing).
+The game paces its frames by the guest's vblank interrupt. Fired from the display's refreshes (a CoreVideo display
+link), each game frame starts right after a refresh and is shown at the next: on a 120 Hz display that is up to 120
+FPS. Paced by its own clock, the game made frames at times unrelated to the refreshes: uncapped, ~80 a second at
+uneven times with the newest shown at each refresh, so the picture stepped 12 to 24 ms of game time a refresh
+(seen as judder on the crowd when the camera pans); at the console's 60, the two 60 Hz clocks drifted and frames
+were shown twice or not at all. FIFA's simulation is time-based: the match clock runs 73 game seconds per 10 s at
+any rate. The guest clock is exact since `patches/fifa/0015`: before it, each read rounded down and the game,
+which reads the clock in a spin, ran 4% slow (60 Hz frames every 17.07 ms, movies 8.5 s for 8.17).
+
+Cut-scenes (the walk-out, replays) run the game's own minimum frame time of 25 ms and draw ~1,000-1,300 draws a
+frame: synced to a 60 Hz display they are an even 30 FPS (two refreshes a frame), from 17-31 uneven FPS before.
+What made them cheaper:
+
+- **MSAA 2x as 1x** (`metal_2x_as_1x`): their scene is drawn at MSAA 2x in two predicated tiles, kept in samples
+  (1280x1440 pixels shaded a frame, a third of the GPU's time); drawn at one sample a pixel as 4x already was,
+  44% less fragment time for it. Real multisample textures (`metal_msaa`) were slower (shaded per sample).
+- **Static linear textures hashed less** (`metal_linear_hash_max_us`): their textures (faces, kits) are linear and
+  were hashed every frame, 27 MB a frame (10% of the command processor); one found unchanged waits twice as long
+  before the next hash, up to 100 ms: 5-8 MB a frame.
 
 What made matches fast (from 26-39 ms a frame before):
 
@@ -63,15 +80,17 @@ What made matches fast (from 26-39 ms a frame before):
 
 | Cvar | Default | What |
 |---|---|---|
-| `video_mode_refresh_rate` | 240 (FIFA) | the guest's vblank clock: 240 uncapped, 60 as on the console |
+| `video_mode_refresh_rate` | 240 (FIFA) | the guest's vblank clock when not synced to the display: 240 uncapped, 60 as on the console |
 | `vsync` | on | off: the vblank every millisecond (unlimited, uneven) |
+| `gpu_vblank_display_sync` | on (FIFA) | the guest vblank on each display refresh; off: `video_mode_refresh_rate`'s clock |
 | `gpu_vblank_precise` | off | experimental: the guest vblank on time instead of checked every 1+ ms (BACKLOG P9) |
 | `gpu_wait_poll_us` | 100 | WAIT_REG_MEM polling interval after 50 us of yielding |
 | `metal_present_upscale` | `metalfx` | `bilinear` to compare |
 | `metal_gpu_fences` / `metal_gpu_fences_all` | on / off | see above |
 | `metal_resolve_into_textures` | on | off: every resolve drops what it overlaps |
 | `metal_texture_mips` | on | the fetch's mip levels and anisotropic filtering |
-| `metal_4x_as_1x` | on | MSAA 4x surfaces at one sample a pixel |
+| `metal_4x_as_1x`, `metal_2x_as_1x` | on | MSAA 4x and 2x surfaces at one sample a pixel |
+| `metal_linear_hash_us`, `metal_linear_hash_max_us` | 8 ms, 100 ms | how often a linear (CPU-written) texture is hashed again; one found unchanged backs off to the max |
 | `metal_shader_storage`, `metal_pipeline_storage`, `metal_async_compile` | on | no compile hitches after the first run |
 | `metal_hitch_log_ms` | 250 | |
 | `metal_stall_sample_ms` | 2000 (FIFA) | 0 off |
