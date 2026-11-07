@@ -20,10 +20,12 @@ mkdir -p "$macos" "$resources"
 cp -f "$build/fifa19" "$macos/fifa19"
 cp -fL "$build"/lib*.dylib "$macos/"            # the runtime and the guest DLLs' libraries
 for lib in "$sdk_lib"/librexgpu-*.dylib; do [ -e "$lib" ] && cp -fL "$lib" "$macos/"; done
+# The Vulkan loader and MoltenVK, for --fifa19_gpu_backend=vulkan (the build keeps them in vulkan/).
+[ -d "$build/vulkan" ] && rm -rf "$macos/vulkan" && cp -RL "$build/vulkan" "$macos/vulkan"
 cp -f "$root/scripts/extract_god.py" "$resources/extract_god.py"
 sh "$root/launcher/mac/build.sh" "$macos/FIFA 19 Launcher"
 
-version=$(git -C "$root" describe --always --dirty 2>/dev/null || echo dev)
+version=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo dev)
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
