@@ -1,0 +1,361 @@
+From 40b3f740b5a45f57de634a98a8c02347df44f9cd Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 21:04:57 +0700
+Subject: [PATCH 16/17] threads (POSIX): multi-object waits keep pulses and
+ wake at once
+
+WaitMultiple polled its objects in 1 ms sleeps without registering as a
+waiter. An event set and reset between two polls (the guest's pulse), or
+pulsed (Set, 10 us, Reset), was lost: the thread slept on until
+something else woke it. FIFA 19 imports NtPulseEvent and
+KeWaitForMultipleObjects; a boot stuck before the intro movie with the
+audio worker in such a wait (1 in 18 boots).
+
+- Multi-object waits take a ticket on every event for their whole
+  length, as single waits do, so a set while they wait releases them.
+- Event Pulse releases the current waiters and leaves the event reset,
+  in one step under the event's lock.
+- A multi-object wait sleeps on its own condition variable, registered
+  on each object it waits for and woken by their notifies: WaitAny
+  returns ~14 us after a Set instead of ~650 us on average.
+---
+ src/core/threading_posix.cpp | 172 ++++++++++++++++++++++++++---------
+ 1 file changed, 131 insertions(+), 41 deletions(-)
+
+diff --git a/src/core/threading_posix.cpp b/src/core/threading_posix.cpp
+index dfe137b..f59ff0d 100644
+--- a/src/core/threading_posix.cpp
++++ b/src/core/threading_posix.cpp
+@@ -300,6 +300,27 @@ class PosixConditionBase {
+   virtual ~PosixConditionBase() = default;
+   virtual bool Signal() = 0;
+ 
++  // A multi-object wait in progress: it sleeps on its own condition variable, and every object it waits for
++  // wakes it from NotifyAll.
++  struct MultiWaiter {
++    std::mutex mutex;
++    std::condition_variable cond;
++    bool woken = false;
++  };
++
++  // Wakes this object's waiters, and the multi-object waits registered on it: called, with mutex_ held, wherever
++  // the object's state may have become signaled.
++  void NotifyAll() {
++    cond_.notify_all();
++    for (MultiWaiter* waiter : multi_waiters_) {
++      {
++        std::lock_guard<std::mutex> lock(waiter->mutex);
++        waiter->woken = true;
++      }
++      waiter->cond.notify_one();
++    }
++  }
++
+   WaitResult Wait(std::chrono::milliseconds timeout) {
+     return WaitUntil(nullptr, DeadlineFromTimeout(timeout), nullptr);
+   }
+@@ -391,7 +412,34 @@ class PosixConditionBase {
+                         ? std::chrono::steady_clock::time_point::max()
+                         : start_time + timeout;
+ 
++    // The wait polls, so it is registered on every object for its whole length (a ticket each): a manual-reset
++    // event set and reset again between two polls (the guest's pulse), or an auto-reset event's release meant for
++    // a waiting thread, still satisfies it, as on the Xbox. Unregistered, such a wakeup was lost and the thread
++    // slept on until something else woke it (a boot stuck before the intro movie, 2026-11-07).
++    // It sleeps on its own condition variable, woken by any of the objects (registered on each).
++    MultiWaiter waiter;
++    std::vector<uint64_t> tickets(handles.size());
++    for (size_t i = 0; i < handles.size(); ++i) {
++      std::lock_guard<std::mutex> lock(handles[i]->mutex_);
++      tickets[i] = handles[i]->OnMultiWaitEnter();
++      handles[i]->multi_waiters_.push_back(&waiter);
++    }
++    auto finish = [&]() {
++      for (size_t i = 0; i < handles.size(); ++i) {
++        std::lock_guard<std::mutex> lock(handles[i]->mutex_);
++        handles[i]->OnMultiWaitExit(tickets[i]);
++        auto& list = handles[i]->multi_waiters_;
++        list.erase(std::find(list.begin(), list.end(), &waiter));
++      }
++    };
++
+     while (true) {
++      // Cleared before the objects are checked: a notify after the check finds it set and the sleep below ends
++      // at once.
++      {
++        std::lock_guard<std::mutex> lock(waiter.mutex);
++        waiter.woken = false;
++      }
+       size_t first_signaled = std::numeric_limits<size_t>::max();
+       bool condition_met = false;
+       bool all_locked = true;
+@@ -430,7 +478,7 @@ class PosixConditionBase {
+       if (wait_all) {
+         bool all_signaled = true;
+         for (size_t i = 0; i < handles.size(); ++i) {
+-          if (!handles[i]->signaled()) {
++          if (!handles[i]->signaled_for(tickets[i])) {
+             all_signaled = false;
+             break;
+           }
+@@ -441,7 +489,7 @@ class PosixConditionBase {
+         condition_met = all_signaled;
+       } else {
+         for (size_t i = 0; i < handles.size(); ++i) {
+-          if (handles[i]->signaled()) {
++          if (handles[i]->signaled_for(tickets[i])) {
+             first_signaled = i;
+             condition_met = true;
+             break;
+@@ -452,11 +500,13 @@ class PosixConditionBase {
+       if (condition_met) {
+         if (wait_all) {
+           for (size_t i = 0; i < handles.size(); ++i) {
+-            handles[i]->post_execution();
++            handles[i]->post_execution_for(tickets[i]);
+           }
+         } else {
+-          handles[first_signaled]->post_execution();
++          handles[first_signaled]->post_execution_for(tickets[first_signaled]);
+         }
++        locks.clear();
++        finish();
+         return std::make_pair(WaitResult::kSuccess, first_signaled);
+       }
+ 
+@@ -464,18 +514,19 @@ class PosixConditionBase {
+ 
+       auto now = std::chrono::steady_clock::now();
+       if (now >= end_time) {
++        finish();
+         return std::make_pair<WaitResult, size_t>(WaitResult::kTimeout, 0);
+       }
+ 
+-      if (timeout == std::chrono::milliseconds::max()) {
+-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+-      } else {
+-        // Sleep the real remaining time, at most 1 ms. Truncating it to whole
+-        // milliseconds turned every wait under 1 ms into a busy spin, and the
+-        // alertable waits poll in 1 ms slices, so their threads never slept.
+-        std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(
+-            end_time - now, std::chrono::milliseconds(1)));
+-      }
++      // Until an object is notified (it was a plain 1 ms sleep: every wakeup came up to a millisecond late), or
++      // the real remaining time, at most 1 ms as before. Truncating it to whole milliseconds turned every wait
++      // under 1 ms into a busy spin, and the alertable waits poll in 1 ms slices, so their threads never slept.
++      const auto slice = timeout == std::chrono::milliseconds::max()
++                             ? std::chrono::steady_clock::duration(std::chrono::milliseconds(1))
++                             : std::min<std::chrono::steady_clock::duration>(end_time - now,
++                                                                            std::chrono::milliseconds(1));
++      std::unique_lock<std::mutex> lock(waiter.mutex);
++      waiter.cond.wait_for(lock, slice, [&] { return waiter.woken; });
+     }
+   }
+ 
+@@ -486,12 +537,21 @@ class PosixConditionBase {
+  protected:
+   inline virtual bool signaled() const = 0;
+   inline virtual void post_execution() = 0;
++  // A multi-object wait's registration (mutex_ held for each): a ticket from OnMultiWaitEnter, then the checks
++  // and the consume for that ticket, then OnMultiWaitExit. Objects without per-waiter state need none of it.
++  virtual uint64_t OnMultiWaitEnter() { return 0; }
++  virtual void OnMultiWaitExit(uint64_t /*ticket*/) {}
++  virtual bool signaled_for(uint64_t /*ticket*/) const { return signaled(); }
++  virtual void post_execution_for(uint64_t /*ticket*/) { post_execution(); }
+   // Called with mutex_ held when a thread enters/leaves a blocking wait on
+   // this object through WaitUntil. `consumed` is true when the wait succeeded.
+   virtual void OnWaitEnter() {}
+   virtual void OnWaitExit(bool /*consumed*/) {}
+   std::condition_variable cond_;
+   std::mutex mutex_;
++
++  // The multi-object waits registered on this object (mutex_ held).
++  std::vector<MultiWaiter*> multi_waiters_;
+ };
+ 
+ // There really is no native POSIX handle for a single wait/signal construct
+@@ -518,7 +578,7 @@ class PosixCondition<Event> : public PosixConditionBase {
+       // already waiting still return success after the reset.
+       signal_ = true;
+       release_boundary_ = next_ticket_;
+-      cond_.notify_all();
++      NotifyAll();
+       return true;
+     }
+     // Auto-reset: on Windows, SetEvent with a waiting thread hands the signal
+@@ -535,7 +595,7 @@ class PosixCondition<Event> : public PosixConditionBase {
+     } else {
+       signal_ = true;
+     }
+-    cond_.notify_all();
++    NotifyAll();
+     return true;
+   }
+ 
+@@ -544,36 +604,62 @@ class PosixCondition<Event> : public PosixConditionBase {
+     signal_ = false;
+   }
+ 
++  // PulseEvent: releases the threads waiting at this moment (all of them for a manual-reset event, one for an
++  // auto-reset event) and leaves the event non-signaled, in one step. It was Set, a 10 us sleep and Reset: a
++  // waiter that did not look in those 10 us missed it, and with no waiter a thread arriving then took it.
++  void Pulse() {
++    auto lock = std::unique_lock<std::mutex>(mutex_);
++    if (manual_reset_) {
++      release_boundary_ = next_ticket_;
++    } else if (waiters_ > release_count_) {
++      if (release_count_ == 0) {
++        release_boundary_ = next_ticket_;
++        eligible_waiters_ = waiters_;
++      }
++      ++release_count_;
++    }
++    signal_ = false;
++    NotifyAll();
++  }
++
+  private:
+-  bool eligible() const {
+-    return !manual_reset_ && release_count_ > 0 && tls_wait_object_ == this &&
+-           tls_ticket_ < release_boundary_;
++  bool eligible(uint64_t ticket) const {
++    return !manual_reset_ && release_count_ > 0 && ticket < release_boundary_;
+   }
+-  bool released_by_earlier_set() const {
+-    return manual_reset_ && tls_wait_object_ == this && tls_ticket_ < release_boundary_;
++  bool released_by_earlier_set(uint64_t ticket) const {
++    return manual_reset_ && ticket < release_boundary_;
+   }
++  bool waiting_here() const { return tls_wait_object_ == this; }
+   inline bool signaled() const override {
+-    return signal_ || eligible() || released_by_earlier_set();
++    return signal_ || (waiting_here() && (eligible(tls_ticket_) || released_by_earlier_set(tls_ticket_)));
+   }
+   inline void post_execution() override {
++    if (waiting_here()) {
++      post_execution_for(tls_ticket_);
++    } else if (!manual_reset_) {
++      signal_ = false;
++    }
++  }
++  bool signaled_for(uint64_t ticket) const override {
++    return signal_ || eligible(ticket) || released_by_earlier_set(ticket);
++  }
++  void post_execution_for(uint64_t ticket) override {
+     if (manual_reset_) {
+       return;
+     }
+-    if (eligible()) {
++    if (eligible(ticket)) {
+       --release_count_;
+     } else {
+       signal_ = false;
+     }
+   }
+-  void OnWaitEnter() override {
+-    tls_wait_object_ = this;
+-    tls_ticket_ = next_ticket_++;
++  uint64_t Register() {
+     ++waiters_;
++    return next_ticket_++;
+   }
+-  void OnWaitExit(bool consumed) override {
+-    const bool was_eligible = !manual_reset_ && tls_ticket_ < release_boundary_;
++  void Unregister(uint64_t ticket) {
++    const bool was_eligible = !manual_reset_ && ticket < release_boundary_;
+     --waiters_;
+-    tls_wait_object_ = nullptr;
+     if (was_eligible && eligible_waiters_ > 0) {
+       --eligible_waiters_;
+     }
+@@ -582,8 +668,18 @@ class PosixCondition<Event> : public PosixConditionBase {
+       signal_ = true;
+       release_count_ = eligible_waiters_;
+     }
++  }
++  void OnWaitEnter() override {
++    tls_wait_object_ = this;
++    tls_ticket_ = Register();
++  }
++  void OnWaitExit(bool consumed) override {
++    Unregister(tls_ticket_);
++    tls_wait_object_ = nullptr;
+     (void)consumed;
+   }
++  uint64_t OnMultiWaitEnter() override { return Register(); }
++  void OnMultiWaitExit(uint64_t ticket) override { Unregister(ticket); }
+   bool signal_;
+   const bool manual_reset_;
+   uint32_t waiters_ = 0;
+@@ -615,7 +711,7 @@ class PosixCondition<Semaphore> : public PosixConditionBase {
+       *out_previous_count = count_;
+     }
+     count_ += release_count;
+-    cond_.notify_all();
++    NotifyAll();
+     return true;
+   }
+ 
+@@ -623,7 +719,7 @@ class PosixCondition<Semaphore> : public PosixConditionBase {
+   inline bool signaled() const override { return count_ > 0; }
+   inline void post_execution() override {
+     count_--;
+-    cond_.notify_all();
++    NotifyAll();
+   }
+   uint32_t count_;
+   const uint32_t maximum_count_;
+@@ -647,7 +743,7 @@ class PosixCondition<Mutant> : public PosixConditionBase {
+       --count_;
+       // Free to be acquired by another thread
+       if (count_ == 0) {
+-        cond_.notify_all();
++        NotifyAll();
+       }
+       return true;
+     }
+@@ -679,7 +775,7 @@ class PosixCondition<Timer> : public PosixConditionBase {
+   bool Signal() override {
+     std::lock_guard<std::mutex> lock(mutex_);
+     signal_ = true;
+-    cond_.notify_all();
++    NotifyAll();
+     return true;
+   }
+ 
+@@ -1250,7 +1346,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
+ 
+       exit_code_ = exit_code;
+       signaled_ = true;
+-      cond_.notify_all();
++      NotifyAll();
+     }
+     if (is_current_thread) {
+       pthread_exit(reinterpret_cast<void*>(exit_code));
+@@ -1552,13 +1648,7 @@ class PosixEvent : public PosixConditionHandle<Event> {
+   ~PosixEvent() override = default;
+   void Set() override { handle_.Signal(); }
+   void Reset() override { handle_.Reset(); }
+-  void Pulse() override {
+-    using namespace std::chrono_literals;
+-    handle_.Signal();
+-    MaybeYield();
+-    Sleep(10us);
+-    handle_.Reset();
+-  }
++  void Pulse() override { handle_.Pulse(); }
+ };
+ 
+ std::unique_ptr<Event> Event::CreateManualResetEvent(bool initial_state) {
+@@ -1748,7 +1838,7 @@ void* PosixCondition<Thread>::ThreadStartRoutine(void* parameter) {
+     std::unique_lock<std::mutex> lock(thread->handle_.mutex_);
+     thread->handle_.exit_code_ = 0;
+     thread->handle_.signaled_ = true;
+-    thread->handle_.cond_.notify_all();
++    thread->handle_.NotifyAll();
+   }
+ 
+   current_thread_ = nullptr;
+-- 
+2.56.0
+

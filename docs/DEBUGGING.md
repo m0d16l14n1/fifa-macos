@@ -18,6 +18,11 @@ performance HUD is on in every run (`FIFA19_METAL_HUD=0` turns it off).
 
 The log is `run.log` in the build folder (the ten before it in `logs/`).
 
+## SDK checks
+
+`bash scripts/test_sdk.sh` builds and runs the programs in `tests/sdk/` against the installed SDK: behaviour the
+game depends on that the SDK's own tests don't cover (today: guest event and multi-object wait semantics).
+
 ## The dev pad
 
 A scripted controller merged with the real ones, for unattended runs:
