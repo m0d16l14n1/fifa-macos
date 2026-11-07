@@ -299,8 +299,10 @@ void RunScript(const std::string& path) {
     return;
   }
   REXLOG_INFO("dev pad: running {}", path);
+  // A line that fails (logged by Execute) is skipped, not the end of the script: an unattended run still reaches
+  // its quit (a typo once left a benchmark running for half an hour).
   for (std::string line; std::getline(in, line);) {
-    if (!Execute(line)) break;
+    Execute(line);
   }
   REXLOG_INFO("dev pad: {} done", path);
 }

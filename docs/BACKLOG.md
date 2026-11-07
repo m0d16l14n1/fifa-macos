@@ -23,14 +23,12 @@ how it is checked. Done items move to the end with their date.
 | P10 | The heaviest moments of a match (replays) are the cut-scene path (P6) | | |
 | P2 | GPU busy in menus is 4-9 ms, in the match 20+ ms of command buffer time a frame: find the passes (`metal_debug_profile` on a dumped frame) | tour log | GPU under 10 ms in a match |
 | P3 | Command processor 4+ ms a frame in menus: profile with Instruments | tour log | |
-| P4 | Benchmark baseline per build (`bench_mac.sh`, HUD on) | | numbers in this file |
 
 ## Audio, input (M3)
 
 | # | Item | Check |
 |---|---|---|
-| A1 | Measure the SDL audio path in a match and in movies (`--audio_stats=true`): underruns, queue depth | no underruns in 10 min |
-| A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback | A1 numbers equal or better, lower latency |
+| A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback. Only for latency now: the SDL path has no underruns (A1, D20) | lower latency, still no underruns |
 | I1 | Controller hot-plug goes to pad one; DualSense/DualShock prompts where possible; rumble | plug/unplug mid-match |
 | I2 | The launcher's Controls page edits the keyboard layout (`keybind_*` cvars) | |
 
@@ -64,4 +62,6 @@ how it is checked. Done items move to the end with their date.
 | D17 | MetalFX temporal AA in FIFA (T1-T4): the scene, depth and camera found in a match frame (METAL.md), wired through the SDK's new title profile (`patches/fifa/0021`): `fifa19_temporal_aa` | 2026-11-08 |
 | D18 | MetalFX frame interpolation in FIFA (T6): the cut-scenes (30 FPS) at 60 on a 60 Hz display, generated only when they can be shown; tone map and HUD marked by `guest_marker_rules`, cuts from the cameras, the notifier no longer counted as UI (`patches/fifa/0022`) | 2026-11-08 |
 | D19 | MetalFX temporal AA no longer soft (T5): contrast-adaptive sharpening after it (`metal_taa_sharpness` 0.6, `patches/fifa/0023`): local contrast 11.2 against 10.4 without temporal AA, 5.2 before | 2026-11-08 |
+| D20 | The SDL audio path measured (A1): no underruns in 8 runs (matches at 60 and uncapped, walk-outs, frame generation on), the underrun warnings of `sdl_audio_driver` silent | 2026-11-08 |
+| D21 | Benchmark baseline (P4), M5 MacBook Air, `bench_mac.sh`, Kick Off, uncapped (`gpu_vblank_display_sync=false`), HUD on: 85.4 FPS (11.7 ms a frame, GPU busy 21.9 ms, CPU waiting 0.2 ms); with temporal AA 85.3 (no measurable cost: matches are bound by the command processor). The benchmark's pad script had a bad line that left it running; the dev pad now skips a failing line | 2026-11-08 |
 | D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |

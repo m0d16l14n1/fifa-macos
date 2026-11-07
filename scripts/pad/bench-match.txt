@@ -30,7 +30,7 @@ stick lx 0.6 4s
 press a
 wait 8s
 stick ly -0.6 4s
-press d
+press b
 wait 12s
 log bench_end
 shot bench
