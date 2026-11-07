@@ -1,7 +1,7 @@
 From a4a127b9e7f9149b4dd56a13d076e9a5baa703d4 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:12:30 +0700
-Subject: [PATCH 06/13] install: ship the codegen tool, Vulkan loader and
+Subject: [PATCH 06/14] install: ship the codegen tool, Vulkan loader and
  MoltenVK for RelWithDebInfo SDKs too
 
 Only Release installed them (and the package config mapped every consumer

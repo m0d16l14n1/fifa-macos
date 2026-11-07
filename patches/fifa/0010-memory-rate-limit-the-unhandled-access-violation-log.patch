@@ -1,7 +1,7 @@
 From f6568be398deea019b128e0b80a95b119ed7262c Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 16:10:22 +0700
-Subject: [PATCH 10/13] memory: rate-limit the unhandled access violation log
+Subject: [PATCH 10/14] memory: rate-limit the unhandled access violation log
 
 A guest stuck on a bad pointer faults again at once, thousands of times a
 second, and the log rotated away everything before it within seconds. The

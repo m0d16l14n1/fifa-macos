@@ -1,7 +1,7 @@
 From 9508003e7adf15900e9a55b05b6686515afbea8f Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 14:58:55 +0700
-Subject: [PATCH 01/13] codegen: inline GPR/LR helpers, classify by function
+Subject: [PATCH 01/14] codegen: inline GPR/LR helpers, classify by function
  base, shared-tail entries, aliased vector packs
 
 From ReStreet (FIFA Street 2012, the same EA engine family):

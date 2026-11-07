@@ -1,7 +1,7 @@
 From 7a24649834c8842dcf1d2891ea814010b225d1c8 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 17:00:55 +0700
-Subject: [PATCH 12/13] threads (macOS): QoS user-interactive, guest priorities
+Subject: [PATCH 12/14] threads (macOS): QoS user-interactive, guest priorities
  as precedence, never SCHED_FIFO
 
 set_priority applied the POSIX ThreadPriority scale (1-32, normal 16) as a

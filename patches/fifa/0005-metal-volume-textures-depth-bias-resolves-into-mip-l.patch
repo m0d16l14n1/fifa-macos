@@ -1,7 +1,7 @@
 From c94f9ff481a8bd782382530b9b21e4a00e836ee3 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:08:00 +0700
-Subject: [PATCH 05/13] metal: volume textures, depth bias, resolves into mip
+Subject: [PATCH 05/14] metal: volume textures, depth bias, resolves into mip
  levels, GPU fences only after resolves, MetalFX present upscale, stall
  reports
 

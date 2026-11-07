@@ -1,7 +1,7 @@
 From c9df976237dcaaf342dcc3499f309f7a12d18688 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 16:10:22 +0700
-Subject: [PATCH 11/13] metal: frame pacing percentiles in the stats
+Subject: [PATCH 11/14] metal: frame pacing percentiles in the stats
 
 Every interval between swaps is kept until the next stats line, which logs
 its p50, p95, p99 and maximum, and how many frames took more than 1.5 times
