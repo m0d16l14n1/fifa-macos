@@ -56,3 +56,5 @@ __pycache__/
 # FIFA 19 macOS port: extracted game files and the local SDK copy
 /fifa19/game/
 /fifa19/third_party/
+/agents
+/skills
