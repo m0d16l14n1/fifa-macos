@@ -89,6 +89,7 @@ What made matches fast (from 26-39 ms a frame before):
 | `metal_gpu_fences` / `metal_gpu_fences_all` | on / off | see above |
 | `metal_resolve_into_textures` | on | off: every resolve drops what it overlaps |
 | `metal_texture_mips` | on | the fetch's mip levels and anisotropic filtering |
+| `metal_taa_sharpness` | 0.6 | sharpening after MetalFX's temporal AA (below 0: none) |
 | `metal_4x_as_1x`, `metal_2x_as_1x` | on | MSAA 4x and 2x surfaces at one sample a pixel |
 | `metal_linear_hash_us`, `metal_linear_hash_max_us` | 8 ms, 100 ms | how often a linear (CPU-written) texture is hashed again; one found unchanged backs off to the max |
 | `metal_shader_storage`, `metal_pipeline_storage`, `metal_async_compile` | on | no compile hitches after the first run |
@@ -102,7 +103,7 @@ What made matches fast (from 26-39 ms a frame before):
 |---|---|
 | Metal 3 renderer (command buffers, render/compute/blit encoders, no-copy guest memory, shader/pipeline storage) | in use |
 | MetalFX **spatial** upscaling at present | in use (FIFA's patch) |
-| MetalFX **temporal** AA (`MTLFXTemporalScaler`) | **works, off by default** (`fifa19_temporal_aa`, launcher: Temporal anti-aliasing): the SDK's title profile (`patches/fifa/0021`) runs it every match frame at 60 FPS; less shimmer, but softer than without (the grass's fine texture is smoothed). Players' own motion is not in the vectors (camera only) |
+| MetalFX **temporal** AA (`MTLFXTemporalScaler`) | **works, off by default** (`fifa19_temporal_aa`, launcher: Temporal anti-aliasing): the SDK's title profile (`patches/fifa/0021`) runs it every frame of matches and cut-scenes at full rate, then a contrast-adaptive sharpening (`metal_taa_sharpness`, 0.6) gives back the detail MetalFX's native-size pass softens. Players' own motion is not in the vectors yet (camera only, BACKLOG T7) |
 | MetalFX temporal **upscaling** | not useful as is: the game's post effects and HUD are drawn at 720p after the scene, so the scene can't be upscaled past 1280x720 there (BACKLOG R1) |
 | MetalFX **frame interpolation** (`MTLFXFrameInterpolator`, macOS 26) | **works, off by default** (`frame_generation=fsr`, launcher: Frame generation; turns temporal AA on): a frame generated between every two only while the game runs below the display's rate. The walk-out and replays (30 FPS) show 60 (300 generated frames presented in 10 s); matches at 60 generate nothing. Camera cuts reset it; at a few cuts one blended frame remains (BACKLOG T8). `patches/fifa/0022` |
 | HDR (EDR, HDR10 metadata) | in the backend; FIFA's tone map and HUD are now marked (`guest_marker_rules`), not tried yet |
