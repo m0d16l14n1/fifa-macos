@@ -59,7 +59,8 @@ if [ ! -f "$records" ]; then
   [ "$(git -C "$src" rev-parse HEAD)" = "$commit" ] || fail "the checkout is not $tag ($commit)"
   echo "==> applying $(patch_list | wc -l | tr -d ' ') patches"
   # The MCLA series as one commit tagged mcla-base, then FIFA's patches as commits of their own (branch fifa):
-  # `git format-patch mcla-base..fifa` exports them again after a change.
+  # `git format-patch mcla-base..fifa` exports them again after a change; a new last commit alone:
+  # `git format-patch -1 fifa --start-number <n>`.
   ident=(-c user.name=fifa19-macos -c user.email=fifa19-macos@localhost)
   git -C "$src" checkout -q -B fifa
   : > "$records.partial"

@@ -1,0 +1,53 @@
+From ba8fb029b3ea56f211e8edc0332ab6d7c2b20517 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 19:04:11 +0700
+Subject: [PATCH] clock: carry the guest tick remainder between updates
+
+Each update converted its host delta with a truncating multiply-divide.
+Read in a spin (games poll the time base), the guest clock lost part of
+a tick on every call: 0.96 guest seconds per real second on a 24 MHz
+host clock. FIFA 19's 60 Hz vblank came every 17.07 ms and its movies
+ran slow.
+---
+ src/core/clock.cpp | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/clock.cpp b/src/core/clock.cpp
+index ae72b7a..563ffb6 100644
+--- a/src/core/clock.cpp
++++ b/src/core/clock.cpp
+@@ -39,6 +39,10 @@ std::pair<uint64_t, uint64_t> guest_tick_ratio_ = std::make_pair(1, 1);
+ uint64_t last_guest_tick_count_ = 0;
+ // Last sampled host tick count.
+ uint64_t last_host_tick_count_ = Clock::QueryHostTickCount();
++// The part of a guest tick (in units of 1 / guest_tick_ratio_.second) the last update did not count. Without it
++// each update rounded its delta down: polled in a spin (as games read the time base), the guest clock ran a few
++// percent slow on a 24 MHz host clock (25/12 guest ticks a host tick): FIFA 19's 60 Hz vblank came every 17.07 ms.
++uint64_t guest_tick_remainder_ = 0;
+ // Mutex to ensure last_host_tick_count_ and last_guest_tick_count_ are in sync
+ std::mutex tick_mutex_;
+ 
+@@ -59,6 +63,7 @@ void RecomputeGuestTickScalar() {
+ 
+   std::lock_guard<std::mutex> lock(tick_mutex_);
+   guest_tick_ratio_ = frac;
++  guest_tick_remainder_ = 0;
+ }
+ 
+ // Update the guest timer for all threads.
+@@ -77,9 +82,9 @@ uint64_t UpdateGuestClock() {
+     uint64_t host_tick_delta =
+         host_tick_count > last_host_tick_count_ ? host_tick_count - last_host_tick_count_ : 0;
+     last_host_tick_count_ = host_tick_count;
+-    uint64_t guest_tick_delta =
+-        host_tick_delta * guest_tick_ratio_.first / guest_tick_ratio_.second;
+-    last_guest_tick_count_ += guest_tick_delta;
++    const uint64_t scaled = host_tick_delta * guest_tick_ratio_.first + guest_tick_remainder_;
++    last_guest_tick_count_ += scaled / guest_tick_ratio_.second;
++    guest_tick_remainder_ = scaled % guest_tick_ratio_.second;
+     return last_guest_tick_count_;
+   } else {
+     // Wait until another thread has finished updating the clock.
+-- 
+2.56.0
+
