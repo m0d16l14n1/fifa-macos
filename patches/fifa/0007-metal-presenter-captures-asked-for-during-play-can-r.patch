@@ -1,8 +1,8 @@
 From d96d83a69069b3804b15d7568621e6ae614fd4cf Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:21:35 +0700
-Subject: [PATCH 7/9] metal presenter: captures asked for during play can read
- the drawable
+Subject: [PATCH 07/13] metal presenter: captures asked for during play can
+ read the drawable
 
 The layer was framebuffer-only unless metal_present_capture was set at start,
 so a capture set later (the dev pad's shot) wrote nothing. The paint now

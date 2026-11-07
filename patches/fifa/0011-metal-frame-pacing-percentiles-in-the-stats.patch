@@ -1,0 +1,61 @@
+From c9df976237dcaaf342dcc3499f309f7a12d18688 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 16:10:22 +0700
+Subject: [PATCH 11/13] metal: frame pacing percentiles in the stats
+
+Every interval between swaps is kept until the next stats line, which logs
+its p50, p95, p99 and maximum, and how many frames took more than 1.5 times
+the median: what shows as choppiness, which the average frame time hides.
+---
+ src/graphics/metal/metal_command_processor.mm | 13 +++++++++++++
+ src/graphics/metal/metal_internal.h           |  3 +++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/src/graphics/metal/metal_command_processor.mm b/src/graphics/metal/metal_command_processor.mm
+index 34f6304..3ce76c8 100644
+--- a/src/graphics/metal/metal_command_processor.mm
++++ b/src/graphics/metal/metal_command_processor.mm
+@@ -573,6 +573,8 @@ void MetalCommandProcessor::IssueSwap([[maybe_unused]] uint32_t frontbuffer_ptr,
+     if (hitch_ms > 0 && last_swap_time_ != std::chrono::steady_clock::time_point{} &&
+         interval * 1000.0 >= double(hitch_ms))
+       REXGPU_WARN("Metal hitch: {:.0f} ms between swaps {} and {}", interval * 1000.0, swaps_ - 1, swaps_);
++    if (last_swap_time_ != std::chrono::steady_clock::time_point{} && interval < 10.0)
++      swap_intervals_us_.push_back(uint32_t(interval * 1e6));
+     last_swap_time_ = now;
+     last_swap_ms_.store(chrono::Clock::QueryHostUptimeMillis(), std::memory_order_relaxed);
+   }
+@@ -761,6 +763,17 @@ void MetalCommandProcessor::MaybeLogStats() {
+   REXGPU_INFO("Metal M1: {:.1f} swaps/s, {:.0f} draws and {:.0f} resolves a swap, {} shaders loaded",
+               stats_swaps_ / seconds, stats_swaps_ ? double(stats_draws_) / stats_swaps_ : 0.0,
+               stats_swaps_ ? double(stats_copies_) / stats_swaps_ : 0.0, shaders_.size());
++  if (swap_intervals_us_.size() >= 10) {
++    auto& v = swap_intervals_us_;
++    std::sort(v.begin(), v.end());
++    auto at = [&](double q) { return v[std::min(v.size() - 1, size_t(q * double(v.size())))] / 1000.0; };
++    // Frames more than half again as long as the median: what the eye sees as a stutter.
++    const uint32_t slow_limit = uint32_t(v[v.size() / 2] * 1.5);
++    const size_t slow = size_t(v.end() - std::upper_bound(v.begin(), v.end(), slow_limit));
++    REXGPU_INFO("Metal frame pacing: {} frames, p50 {:.2f} ms, p95 {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms; {} over "
++                "1.5x the median", v.size(), at(0.5), at(0.95), at(0.99), v.back() / 1000.0, slow);
++  }
++  swap_intervals_us_.clear();
+   if (draw_) REXGPU_INFO("Metal rasterizer: {} draws submitted, {} color resolves, {} failures total", draw_->draws(), draw_->resolves(), draw_->failures());
+   if (shader_compiler_) {
+     const MetalShaderCompiler::Stats& s = shader_compiler_->stats();
+diff --git a/src/graphics/metal/metal_internal.h b/src/graphics/metal/metal_internal.h
+index 20b7e3b..a81e9ce 100644
+--- a/src/graphics/metal/metal_internal.h
++++ b/src/graphics/metal/metal_internal.h
+@@ -295,6 +295,9 @@ class MetalCommandProcessor final : public CommandProcessor {
+   // Stall reports (metal_hitch_log_ms, metal_stall_sample_ms): the last swap's time in host milliseconds for the
+   // watchdog thread, which samples every thread's stack once a stall passes the limit.
+   std::atomic<uint64_t> last_swap_ms_{0};
++  // Every interval between swaps since the last stats line, in microseconds: its percentiles say how even the
++  // frames are (choppiness), which an average hides.
++  std::vector<uint32_t> swap_intervals_us_;
+   std::thread stall_watchdog_;
+   std::mutex stall_mutex_;
+   std::condition_variable stall_cv_;
+-- 
+2.56.0
+

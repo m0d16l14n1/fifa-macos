@@ -7,6 +7,7 @@ struct Setting: Identifiable {
     enum Kind {
         case toggle
         case choice([(value: String, label: String)])
+        case numberChoice([(value: Double, label: String)])
         case number(range: ClosedRange<Int>)
     }
 
@@ -26,9 +27,14 @@ struct Setting: Identifiable {
                 kind: .choice([("metalfx", "MetalFX spatial"), ("bilinear", "Bilinear")]), defaultValue: .string("metalfx")),
         Setting(key: "fullscreen", title: "Fullscreen", detail: "Off: a window (it can be resized).",
                 kind: .toggle, defaultValue: .bool(false)),
-        Setting(key: "vsync", title: "Cap the frame rate at 60",
-                detail: "Off (default): the game renders as fast as it can; the window still shows whole frames.",
-                kind: .toggle, defaultValue: .bool(false)),
+        Setting(key: "video_mode_refresh_rate", title: "Frame rate",
+                detail: "The game paces its frames by this clock. 240: uncapped (as fast as the Mac draws them). "
+                    + "60: as on the console.",
+                kind: .numberChoice([(240, "Uncapped (up to 240)"), (120, "Up to 120"), (60, "60, as on the console")]),
+                defaultValue: .double(240)),
+        Setting(key: "vsync", title: "Pace frames by that clock",
+                detail: "Off: no pacing at all; faster still, but frames come at uneven times (choppy).",
+                kind: .toggle, defaultValue: .bool(true)),
         Setting(key: "metal_gpu_fences", title: "GPU fences",
                 detail: "Needed for the pitch's shadows (they are baked from GPU work at match load).",
                 kind: .toggle, defaultValue: .bool(true)),
@@ -80,6 +86,11 @@ struct SettingsPage: View {
             case .choice(let options):
                 Picker(s.title, selection: Binding(get: { current.string ?? "" },
                                                    set: { game.set(s.key, .string($0), default: s.defaultValue) })) {
+                    ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
+                }
+            case .numberChoice(let options):
+                Picker(s.title, selection: Binding(get: { current.number ?? 0 },
+                                                   set: { game.set(s.key, .double($0), default: s.defaultValue) })) {
                     ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
                 }
             case .number(let range):

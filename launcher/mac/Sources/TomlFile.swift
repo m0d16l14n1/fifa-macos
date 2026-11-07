@@ -33,6 +33,13 @@ enum TomlValue: Equatable {
 
     var string: String? { if case .string(let s) = self { return s }; return nil }
     var bool: Bool? { if case .bool(let b) = self { return b }; return nil }
+    var number: Double? {
+        switch self {
+        case .int(let i): return Double(i)
+        case .double(let d): return d
+        default: return nil
+        }
+    }
     var int: Int? {
         switch self {
         case .int(let i): return i

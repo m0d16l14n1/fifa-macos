@@ -1,7 +1,7 @@
 From 0b8e0591461773eea6d686f484d03b9cba057bd5 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:01:48 +0700
-Subject: [PATCH 2/9] codegen: a module's registration walks PPCFuncMappings
+Subject: [PATCH 02/13] codegen: a module's registration walks PPCFuncMappings
 
 One SetFunction call per function in a single body made clang spend over 30
 minutes on FIFA 19's CardsDLLzf.

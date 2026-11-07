@@ -29,6 +29,10 @@ on its own, as a patch in `fifa/`, after it has been tested in FIFA.
 | `0007` present capture | A capture asked for during play (the dev pad's `shot`) can read the drawable: the layer is framebuffer-only only while nothing is captured. |
 | `0008` resolves into textures | Generalizes 0005's resolve into mips: any loaded tiled 2D level at a resolve's address with the same pitch and format takes the resolve by a GPU blit at its offset (FIFA resolves into the corner of a 2048x2048 texture and into targets fetched at sizes that are not multiples of 8). Texture reloads in a match: 10 a frame to none. `metal_resolve_into_textures`, `_log`. |
 | `0009` WAIT_REG_MEM polling | The command processor polled in sleeps of `wait/0x100` ms; it now yields 50 us, then sleeps `gpu_wait_poll_us` (100). Each CPU-to-GPU handoff cost a millisecond or more: a match went from 26-39 ms a frame to the 60 Hz cap. `gpu_wait_stats` logs where waits go. |
+| `0010` access violation log | An unhandled guest access violation is logged 32 times, then once in 100000 with a count (a stuck guest faulted 10000 times a second and rotated the log away). |
+| `0011` frame pacing | The stats line's frame-interval percentiles (p50/p95/p99/max, frames over 1.5x the median): choppiness in numbers. |
+| `0012` thread priorities (macOS) | Threads are created QoS user-interactive; a guest priority is a Mach precedence, never `SCHED_FIFO`. The POSIX scale (normal = 16) as a fixed FIFO priority put the game's threads below every ordinary thread on the Mac (31). |
+| `0013` WAIT_REG_MEM with vsync off | The short-sleep polling of 0009 also when uncapped (it spun, taking a core from the threads it waited for). |
 
 ## Changing the SDK
 

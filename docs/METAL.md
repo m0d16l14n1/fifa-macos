@@ -31,10 +31,39 @@ FIFA 19 is drawn by the SDK's native Xenos-on-Metal backend (`src/graphics/metal
 | `metal_present_upscale=metalfx` (FIFA default) | the game draws 1280x720; MetalFX's spatial scaler is sharper than bilinear on a Retina window |
 | `metal_hitch_log_ms`, `metal_stall_sample_ms` | a line per slow frame; every thread's stack when frames stop |
 
+## Frame rate and pacing
+
+Measured on an M5 MacBook Air, Kick Off match, background window, Metal HUD on (2026-11-07):
+
+| Mode | Settings | Match | Menus | Even? |
+|---|---|---|---|---|
+| Uncapped (default) | `video_mode_refresh_rate=240`, `vsync=true` | ~80 FPS (p50 12 ms) | ~115 FPS | yes: frames on a 4 ms grid |
+| Console | `video_mode_refresh_rate=60` | 58.6 FPS (p99 18.3 ms) | 60 | yes (BACKLOG P1: 17.07 ms, not 16.67) |
+| Unlimited | `vsync=false` (the guest's vblank every 1 ms) | ~85-90 FPS | | no: p95 17-19 ms at an 11 ms median |
+
+The game paces its frames by the guest's vblank interrupt, so raising that clock is the smooth way to uncap it.
+FIFA's simulation is time-based: the match clock runs 73 game seconds per 10 s at 60 and at 240 Hz alike.
+The presenter still shows whole frames in step with the display (no tearing).
+
+What made matches fast (from 26-39 ms a frame before):
+
+- **Resolves into loaded textures** (`metal_resolve_into_textures`): the game resolves into the corner of a 2048x2048
+  texture and into targets fetched at sizes that are not multiples of 8; each resolve dropped the texture and the
+  next fetch untiled it again (10 loads, 8 MB+, a frame). Now the resolve is blitted into the texture.
+- **WAIT_REG_MEM polling** (`gpu_wait_poll_us`, 100): the command processor slept whole milliseconds while the
+  render thread spun on its D3D fence, several times a frame.
+- **Scheduling**: a latency-critical process activity, QoS user-interactive threads, and guest priorities as Mach
+  precedence instead of a fixed `SCHED_FIFO` priority below every other thread.
+
+`gpu_wait_stats`, `fifa19_limiter_stats` and the `Metal frame pacing` line (p50/p95/p99/max) show where time goes.
+
 ## Settings that matter
 
 | Cvar | Default | What |
 |---|---|---|
+| `video_mode_refresh_rate` | 240 (FIFA) | the guest's vblank clock: 240 uncapped, 60 as on the console |
+| `vsync` | on | off: the vblank every millisecond (unlimited, uneven) |
+| `gpu_wait_poll_us` | 100 | WAIT_REG_MEM polling interval after 50 us of yielding |
 | `metal_present_upscale` | `metalfx` | `bilinear` to compare |
 | `metal_gpu_fences` / `metal_gpu_fences_all` | on / off | see above |
 | `metal_resolve_into_textures` | on | off: every resolve drops what it overlaps |

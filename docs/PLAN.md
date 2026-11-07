@@ -46,7 +46,7 @@ Goal: the EA intro and every in-game movie at their own frame rate, in sync with
    allows, rumble, DualSense light bar off/team colour.
 3. Keyboard and mouse: already the Classic keyboard layout; the launcher's Controls page edits the keys.
 
-## M4: performance
+## M4: performance (in progress: matches went from 26-39 ms to ~12 ms a frame uncapped, see METAL.md)
 
 Goal: 60 FPS held in the heaviest match (rain, night, full stadium) with the GPU under 10 ms and the command
 processor under 8 ms, on an M-series base chip.

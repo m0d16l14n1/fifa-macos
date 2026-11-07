@@ -1,0 +1,48 @@
+From f6568be398deea019b128e0b80a95b119ed7262c Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sat, 7 Nov 2026 16:10:22 +0700
+Subject: [PATCH 10/13] memory: rate-limit the unhandled access violation log
+
+A guest stuck on a bad pointer faults again at once, thousands of times a
+second, and the log rotated away everything before it within seconds. The
+first 32 are logged, then one line in 100000 with the running count.
+---
+ src/system/xmemory.cpp | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
+index 5dc8294..757a397 100644
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cstring>
+ #include <utility>
+ 
+@@ -580,10 +581,16 @@ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> glob
+   uint32_t virtual_address = HostToGuestVirtual(host_address);
+   BaseHeap* heap = LookupHeap(virtual_address);
+   if (!heap || heap->heap_type() != memory::HeapType::kGuestPhysical) {
+-    REXSYS_ERROR(
+-        "Unhandled guest access violation: {} of guest 0x{:08X} (host 0x{:016X}) on thread 0x{:X}",
+-        is_write ? "write" : "read", virtual_address, reinterpret_cast<uintptr_t>(host_address),
+-        rex::thread::current_thread_id());
++    // A guest stuck on a bad pointer faults again at once, thousands of times a second: the first ones are
++    // logged, then one line in 100000 with the count, so the log keeps what came before.
++    static std::atomic<uint64_t> unhandled{0};
++    const uint64_t n = unhandled.fetch_add(1, std::memory_order_relaxed) + 1;
++    if (n <= 32 || n % 100000 == 0) {
++      REXSYS_ERROR(
++          "Unhandled guest access violation: {} of guest 0x{:08X} (host 0x{:016X}) on thread 0x{:X} ({} so far)",
++          is_write ? "write" : "read", virtual_address, reinterpret_cast<uintptr_t>(host_address),
++          rex::thread::current_thread_id(), n);
++    }
+     return false;
+   }
+ 
+-- 
+2.56.0
+

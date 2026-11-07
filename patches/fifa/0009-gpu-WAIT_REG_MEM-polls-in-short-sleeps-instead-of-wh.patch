@@ -1,8 +1,8 @@
 From 5ca0dcf053ec87b82ac7b41fb177a6bf91d71361 Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:55:05 +0700
-Subject: [PATCH 9/9] gpu: WAIT_REG_MEM polls in short sleeps instead of whole
- milliseconds
+Subject: [PATCH 09/13] gpu: WAIT_REG_MEM polls in short sleeps instead of
+ whole milliseconds
 
 The command processor slept wait/0x100 ms (1 ms or more) whenever a polled
 value did not match yet. FIFA 19's render thread hands the GPU a value and

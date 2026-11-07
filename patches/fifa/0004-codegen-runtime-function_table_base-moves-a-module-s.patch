@@ -1,7 +1,7 @@
 From 6fdd388dc3e73383e75fd37824a74f7c3276529e Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:01:48 +0700
-Subject: [PATCH 4/9] codegen/runtime: function_table_base moves a module's
+Subject: [PATCH 04/13] codegen/runtime: function_table_base moves a module's
  indirect-call table
 
 A module's table (twice its code size plus the thunk reserve) normally follows

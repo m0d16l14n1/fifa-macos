@@ -7,10 +7,9 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item | Seen | Check |
 |---|---|---|---|
-| C1 | `cache:` is not mounted: the game's `cache:\replay0.bin` fails to open (instant replays and highlights may need it). Mount it on `~/Library/Application Support/FIFA 19/cache-device` | every boot log (`ResolvePath(cache:\) failed`) | a replay in a match plays; no ResolvePath error |
 | C2 | Every mode toured with shots: Kick Off is mapped; Career, Ultimate Team (CardsDLLzf), Tournaments, Skill Games, Women's, Champions League not yet | | `tour.txt` per mode, pictures compared |
 | C3 | Stadium × time of day × weather matrix (`scripts/pad/match.sh`): shadows, rain, snow, night lighting | | a shot per combination |
-| C4 | Intro and in-game movies: frame rate, audio-video sync, no tearing or stalls | | M2 measurements |
+| C4 | Movies (`data/movies/*.vp6`: the boot intro and outro) at the default 240 Hz pacing: check they play in real time (a movie player paced by vblanks would run 4x fast); the boot intro seems to play on a first boot only | not seen in test runs (profile exists) | a run with a fresh profile, timed |
 | C5 | `Presenter: UI overlay painting isn't available with this graphics backend` at start: the presenter's separate UI layer (for frame generation) has no Metal implementation; the F3/F4 overlays still draw over the picture. Needed for T5 | every boot log | F3/F4 visible in a shot; the line gone once T5 lands |
 | C6 | `gamecontrollerdb.txt` missing: SDL's built-in mappings are used; ship the community database for unusual pads | every boot log | a third-party pad maps right |
 
@@ -18,7 +17,10 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item | Seen | Check |
 |---|---|---|---|
-| P1 | Frames average 17.3 ms (57.8 FPS), not 16.7 at a 60 Hz display: pacing loses about one frame in 30 | `Metal frame time` lines in menus and matches | 16.7 ms average, even cadence (HUD frame graph flat) |
+| P1 | At the console's 60 Hz (`video_mode_refresh_rate=60`) frames average 17.07 ms (58.6 FPS) with p99 18.3 ms: about one vblank in 40 is missed. The default (240 Hz pacing) is not affected | pacing lines, `--video_mode_refresh_rate=60` | 16.7 ms average at 60 |
+| P5 | The main loop's step limiter (`sub_823686C0`, 1/200 s) spins a whole core (~97% of the main thread). A sleeping version (`src/native_frame_limiter.cpp`, `FIFA19_NATIVE_LIMITER=1`) makes another guest thread fault reading 0x1 in a loop: a race the spin's timing hides. Find the racing thread (stall sample at the first fault) | sample of a match; limiter run | the hook on by default, no faults over a full match |
+| P6 | Walk-out and other cut-scenes run the game's own 1/40 s limiter (25 ms steps) and heavier frames: 25-40 ms there | tour pacing lines, `fifa19_limiter_stats` | decide whether to lift the cut-scene cap when uncapped |
+| P7 | Uncapped matches still show 3-36 frames in 5 s over 1.5x the median (p99 17-32 ms at a 12 ms median) | tour pacing lines | p99 under 1.5x the median |
 | P2 | GPU busy in menus is 4-9 ms, in the match 20+ ms of command buffer time a frame: find the passes (`metal_debug_profile` on a dumped frame) | tour log | GPU under 10 ms in a match |
 | P3 | Command processor 4+ ms a frame in menus: profile with Instruments | tour log | |
 | P4 | Benchmark baseline per build (`bench_mac.sh`, HUD on) | | numbers in this file |
@@ -53,3 +55,7 @@ how it is checked. Done items move to the end with their date.
 | D3 | FIFA's lost SDK changes rebuilt: codegen fixes, DLL loading, `function_table_base`, 3D textures, depth bias, resolves into mips, fences, MetalFX spatial present, stall reports | 2026-11-07 |
 | D4 | In-process shots during play (presenter switches the layer off framebuffer-only while capturing) | 2026-11-07 |
 | D5 | Settings, saves and caches in Application Support (old `~/.local/share/fifa19` moved) | 2026-11-07 |
+| D6 | Match performance: resolves into loaded textures (texture reloads 10 a frame -> 0) and WAIT_REG_MEM polling in 100 us sleeps (each CPU-GPU handoff cost 1+ ms): a Kick Off match from 26-39 ms a frame to the 60 Hz cap | 2026-11-07 |
+| D7 | Smoothness: latency-critical process activity, QoS user-interactive threads (guest priorities had been fixed below every other thread), polite polling when uncapped | 2026-11-07 |
+| D8 | Uncapped by default as 240 Hz vblank pacing: ~80 FPS in a match, ~115 in menus, even frames; the match clock runs at the same rate as at 60 Hz (73 game seconds per 10 s, measured both ways) | 2026-11-07 |
+| D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |

@@ -15,6 +15,8 @@ set(FIFA19_SOURCES
     src/fifa19_app.cpp
     src/stubs.cpp
     src/native_libc_hooks.cpp
+    src/native_frame_limiter.cpp
+    src/mac_activity.mm
     src/dev_pad.cpp
 )
 
@@ -22,6 +24,10 @@ add_executable(fifa19 ${FIFA19_SOURCES})
 
 rexglue_setup_target(fifa19 GPU_PLUGINS xenos)
 target_include_directories(fifa19 PRIVATE src)
+
+# Objective-C++ (ARC) for the macOS pieces, compiled by the C++ compiler.
+set_source_files_properties(src/mac_activity.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
+target_link_libraries(fifa19 PRIVATE "-framework Foundation")
 
 # The SDK keeps ImGui private to rexruntime; its public UI headers still need the include directory.
 if(TARGET imgui::imgui)

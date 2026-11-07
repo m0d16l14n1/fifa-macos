@@ -16,6 +16,7 @@
 #include <rex/system/gpu_plugin.h>
 
 void Fifa19DevPadConfigure(rex::RuntimeConfig& config);  // dev_pad.cpp
+void Fifa19BeginGameActivity();                          // mac_activity.mm
 void Fifa19DevPadStart();
 
 // Metal is the default on macOS: the SDK's native Xenos backend (MCLA's rexglue-metal-backend.patch).
@@ -78,9 +79,6 @@ static void SetMetalDefaults() {
       {"metal_present_upscale", "metalfx"},
       // A stall of 2 s leaves every thread's stack in stall-<time>.txt in the working folder.
       {"metal_stall_sample_ms", "2000"},
-      // Uncapped: the guest's vblank interrupt is not held to 60 Hz. The presenter still shows whole frames in
-      // step with the display (no tearing). (Registered by the GPU plugin, like the Metal cvars.)
-      {"vsync", "false"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (!rex::cvar::SetDefaultValue(name, value)) {
@@ -90,9 +88,16 @@ static void SetMetalDefaults() {
 }
 
 void Fifa19App::OnPreSetup(rex::RuntimeConfig& config) {
+  Fifa19BeginGameActivity();
   SetKeyboardDefaults();
   // A window by default (the SDK starts fullscreen); fullscreen=true in fifa19.toml or on the command line.
   rex::cvar::SetDefaultValue("fullscreen", "false");
+  // Uncapped, smoothly: the game paces its frames by the guest's vblank, and that clock runs at 240 Hz instead of
+  // the console's 60, so frames come as fast as the game makes them (about 80 a second in a match on an M5) on an
+  // even 4 ms grid. FIFA's simulation is time-based: the match clock runs at the same rate as at 60 Hz (measured).
+  // vsync=false (the vblank every millisecond) is faster still but uneven; video_mode_refresh_rate=60 is the
+  // console's cap.
+  rex::cvar::SetDefaultValue("video_mode_refresh_rate", "240");
   if (config.gpu_plugin.empty()) {
     config.gpu_plugin = "xenos";
   }

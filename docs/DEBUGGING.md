@@ -13,6 +13,7 @@ performance HUD is on in every run (`FIFA19_METAL_HUD=0` turns it off).
 | `FIFA19_METAL_VALIDATION=1` | Metal API validation (slow) |
 | `FIFA19_LLDB=1` | under lldb: stops at the first crash, `bt all` for every thread |
 | `FIFA19_NATIVE_LIBC=0` | the game's own memcpy/memset/memmove instead of the host's |
+| `FIFA19_NATIVE_LIMITER=1` | the main loop's step limiter sleeps instead of spinning (experimental, BACKLOG P5) |
 | `FIFA19_BUILD=release` | another build folder |
 
 The log is `run.log` in the build folder (the ten before it in `logs/`).
@@ -41,7 +42,12 @@ shots/*.ppm` converts them. `--metal_present_capture=<file.ppm>` writes one ever
 |---|---|
 | a slow frame | `Metal hitch: N ms between swaps` lines (`metal_hitch_log_ms`, 250 by default) |
 | the game stops presenting | `stall-<time>.txt` in the working folder: every thread's stack after 2 s without a frame (`metal_stall_sample_ms`) |
-| steady-state cost | the `Metal frame time` line every 150 frames: GPU busy, CPU waiting, texture loads, resolves into mips, passes |
+| steady-state cost | the `Metal frame time` line every 150 frames: GPU busy, CPU waiting, texture loads, resolves into textures, passes |
+| choppiness | the `Metal frame pacing` line every 5 s: p50/p95/p99/max frame interval, frames over 1.5x the median |
+| the GPU waiting on the game | `--gpu_wait_stats=true`: what WAIT_REG_MEM polled and for how long |
+| the game's own frame limiters | `--fifa19_limiter_stats=true`: calls and waits per divisor of `sub_823686C0` |
+| a resolve reloading a texture | `--metal_resolve_into_textures_log=true`: why a resolve was not copied into a loaded texture |
+| what every thread is doing | `/usr/bin/sample <pid> 5` during play; `Sort by top of stack` at its end |
 | fences | `Metal fences: N a frame written by the GPU, M by the command processor at once` |
 | a wrong texture | `metal_debug_frame=<n>` logs every draw, texture load and resolve of frame n; `metal_debug_capture=true` (dev pad `set`) dumps a frame's resolves to `metal_debug_dir` |
 | a Metal error | `FIFA19_METAL_VALIDATION=1` |

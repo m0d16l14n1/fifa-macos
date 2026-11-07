@@ -1,7 +1,7 @@
 From 21cf8b67a9a78b835399cfc56261a8e69031262b Mon Sep 17 00:00:00 2001
 From: Nick <nekreshen@yandex.ru>
 Date: Sat, 7 Nov 2026 15:55:05 +0700
-Subject: [PATCH 8/9] metal: resolves into any loaded tiled texture, not only
+Subject: [PATCH 08/13] metal: resolves into any loaded tiled texture, not only
  mip levels
 
 FIFA 19 resolves into the corner of a 2048x2048 k_4_4_4_4 texture, and into

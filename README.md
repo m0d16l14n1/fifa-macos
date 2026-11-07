@@ -1,8 +1,9 @@
 # FIFA 19 for macOS
 
 The Xbox 360 FIFA 19 (title 454109F9), statically recompiled with [ReXGlue](https://github.com/rexglue/rexglue-sdk)
-and drawn natively with Metal on Apple silicon. It boots, goes through the menus and plays Kick Off matches at
-60 Hz in a window, with MetalFX upscaling to the window's size.
+and drawn natively with Metal on Apple silicon. It boots, goes through the menus and plays Kick Off matches
+uncapped (about 80 FPS in a match on an M5 MacBook Air, evenly paced) in a window, with MetalFX upscaling to the
+window's size.
 
 **Bring your own game**: a Games on Demand package of FIFA 19. Nothing of the game is in this repository.
 Offline play only.
@@ -78,7 +79,8 @@ Notes:
 
 ## Status
 
-- Kick Off matches play at 60 Hz on an M5; menus and the intro work. Other modes are untested (BACKLOG C2).
+- Kick Off matches play uncapped at about 80 FPS on an M5 MacBook Air (menus about 115); `--video_mode_refresh_rate=60`
+  holds the console's 60. Other modes are untested (BACKLOG C2).
 - MetalFX spatial upscaling is on; temporal AA, temporal upscaling and frame interpolation wait for FIFA's camera
   and depth to be found (BACKLOG T1-T5). Metal 4 is planned (PLAN M6).
 - Online features, XeKeys, media verification and XHttp are stubs.
