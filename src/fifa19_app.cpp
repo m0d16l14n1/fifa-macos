@@ -28,6 +28,10 @@ REXCVAR_DEFINE_STRING(fifa19_gpu_backend, "metal", "FIFA19",
 // Unattended test runs name their window, so a player can tell them from a game they started.
 REXCVAR_DEFINE_STRING(fifa19_window_title, "FIFA 19", "FIFA19", "The window's title")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fifa19_temporal_aa, false, "FIFA19",
+                    "MetalFX temporal anti-aliasing of the 3D scene (less shimmer on lines and edges, a softer "
+                    "picture: the grass's fine texture is smoothed). Restart")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // The keyboard plays as pad one (merged with any real pad), laid out like FIFA's keyboard-only Classic controls on
 // PC: arrows move, W/A/S/D are through ball / lob / pass / shoot. These are defaults: the config file, the command
@@ -85,6 +89,15 @@ static void SetMetalDefaults() {
       // refresh showed the newest: motion stepped 12 to 24 ms a refresh, which shows as judder on the crowd.
       // false: video_mode_refresh_rate's clock (uncapped at 240).
       {"gpu_vblank_display_sync", "true"},
+      // Temporal AA's place in FIFA's frame (temporal_aa_anchor_ps, temporal_aa_camera; on with
+      // fifa19_temporal_aa): the pass runs before the composite that first reads the scene (pixel shader
+      // C4F1B7FC, texture 0 the 1280x720 scene; the depth is the frame's last depth resolve), and the camera is
+      // the view-projection in the scene's vertex shaders' constants: the players' (443F0A79: c1-c4 after
+      // skinning to world space; F4EC1B9B, 6798832A: c1-c4) and the skinned props' (EC79FAF2, 71347B6C:
+      // c0-c3 after their world matrix in c32-c35). Found in a match frame dump (docs/METAL.md).
+      {"temporal_aa_anchor_ps", "C4F1B7FC4C922703"},
+      {"temporal_aa_camera",
+       "443F0A79A4511E2A:1,EC79FAF2D2D5D3A2:0,71347B6C3E6EF3F3:0,F4EC1B9B71624CC5:1,6798832ABD1C5D32:1"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (!rex::cvar::SetDefaultValue(name, value)) {
@@ -197,6 +210,8 @@ void Fifa19App::OnPostSetup() {
   // EA's engine (as in FIFA Street) leaves texture fetch constants tagged invalid whose address and
   // format fields are still in use.
   rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
+  // temporal_aa is a title's runtime switch (not read from a config file): FIFA's own setting sets it.
+  if (REXCVAR_GET(fifa19_temporal_aa)) rex::cvar::SetFlagByName("temporal_aa", "fsr");
   Fifa19DevPadStart();
 }
 

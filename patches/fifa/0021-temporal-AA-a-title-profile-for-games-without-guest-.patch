@@ -1,0 +1,577 @@
+From 96d46ead912db2d7963ad13c7764a82e92a274d7 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 01:54:39 +0700
+Subject: [PATCH] temporal AA: a title profile for games without guest markers
+
+MCLA's temporal AA starts from its own guest markers and motion blur
+shader. temporal_aa_anchor_ps and temporal_aa_camera let a title name
+its frame instead: the scene is the draws on MSAA 2x surfaces (jittered,
+tiles included), up to the first colour draw elsewhere; the camera's
+view-projection is read from the constants of named vertex shaders in
+the scene (the last frame's kept for camera motion); the pass runs
+before the anchor pixel shader's draw, whose texture 0 is the scene,
+with the frame's last depth resolve as the depth. A cut (the screen's
+centre moving a third of the width) resets the history.
+
+Metal: the depth's map to clip z comes from the scene's viewport (MCLA:
+1 - depth), the scaler takes the scene's own colour format (8-bit after
+a tone map, no auto exposure), and metal_taa_debug_vectors draws the
+motion vectors in place of the result.
+
+FIFA 19 (anchor C4F1B7FC, players' and props' view-projection): the pass
+runs every match frame at 60 FPS; camera vectors check out (zero with a
+still camera, an even field when it pans); the picture is softer than
+without (grass texture smoothed).
+---
+ include/rex/graphics/command_processor.h      |  20 ++
+ src/graphics/command_processor.cpp            |   3 +-
+ src/graphics/metal/metal_command_processor.mm |   3 +-
+ src/graphics/metal/metal_draw.h               |   8 +
+ src/graphics/metal/metal_draw.mm              |  58 +++--
+ src/graphics/metal/metal_resolve.h            |  15 +-
+ src/graphics/temporal_aa.cpp                  | 204 +++++++++++++++++-
+ 7 files changed, 294 insertions(+), 17 deletions(-)
+
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index d3b88d0..d25b49c 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -437,6 +437,9 @@ class CommandProcessor {
+     // The jitter (host pixels, y down), which component of the stencil view is
+     // the stencil (set by the backend), 0.
+     float jitter[4];
++    // The depth to the clip position's z: z = depth * x + y (MCLA: 1 - depth; a
++    // title profile: from the scene's viewport), 0, 0.
++    float depth_map[4];
+   };
+   TaaVectorConstants taa_vector_constants_ = {};
+   // What FSR needs from the camera besides the vectors.
+@@ -455,6 +458,9 @@ class CommandProcessor {
+   // Set by TaaCheckDraw for the draw about to be issued: the backend runs the
+   // pass before recording it (TaaRun) and sets taa_frame_.done.
+   bool taa_pending_ = false;
++  // A title profile (temporal_aa_anchor_ps) drives the pass instead of guest markers: its depth is the frame's
++  // last depth resolve, and there is no stencil.
++  bool TaaProfileActive() const { return taa_profile_anchor_ != 0; }
+   // The milliseconds since the previous pass, for FSR.
+   float taa_frame_time_ms_ = 16.7f;
+   // Adds this frame's jitter to a draw's NDC offset if it is one of the scene's
+@@ -581,6 +587,20 @@ class CommandProcessor {
+ 
+  private:
+   bool TaaCheckDraw();
++  // Temporal AA for a title without guest markers (temporal_aa_anchor_ps, temporal_aa_camera): the scene
++  // is the draws on MSAA 2x surfaces (jittered), up to the first colour draw on another surface; the camera's
++  // view-projection is read from the constants of known vertex shaders in the scene, and the last frame's is
++  // kept for the motion; the pass runs before the anchor pixel shader's draw, whose texture 0 is the scene,
++  // with the frame's last depth resolve of the scene's size as the depth.
++  void TaaProfileBeforeDraw();
++  bool TaaProfileCheckDraw();
++  void TaaProfileParse();
++  bool taa_profile_parsed_ = false;
++  uint64_t taa_profile_anchor_ = 0;
++  std::vector<std::pair<uint64_t, uint32_t>> taa_profile_camera_;  // vertex shader hash, first row's constant
++  double taa_profile_vp_[4][4] = {}, taa_profile_prev_vp_[4][4] = {};  // row vectors: clip = position x VP
++  bool taa_profile_have_vp_ = false, taa_profile_have_prev_ = false, taa_profile_scene_seen_ = false;
++  float taa_profile_depth_map_[2] = {-1.0f, 1.0f};
+   void TaaEndFrame();
+   void TaaSceneMarker(uint32_t slot);
+   void TaaUpscaleDecide();
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index fae2efe..1716680 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -3052,7 +3052,8 @@ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32
+           xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
+       // HDR output: the UI layer (may change the alpha blend for this draw).
+       bool hdr_blend_overridden = HdrBeforeDraw();
+-      // Temporal AA: the anti-aliasing pass goes before this draw.
++      // Temporal AA: a title profile's scene and camera, then the anti-aliasing pass before this draw.
++      TaaProfileBeforeDraw();
+       taa_pending_ = TaaCheckDraw();
+       const bool occlusion_draw = occlusion_guest_open_ && occlusion_host_began_;
+       const uint64_t host_draws_recorded_before = host_draws_recorded_;
+diff --git a/src/graphics/metal/metal_command_processor.mm b/src/graphics/metal/metal_command_processor.mm
+index 3ce76c8..05c00e5 100644
+--- a/src/graphics/metal/metal_command_processor.mm
++++ b/src/graphics/metal/metal_command_processor.mm
+@@ -389,7 +389,8 @@ bool MetalCommandProcessor::IssueDraw([[maybe_unused]] xenos::PrimitiveType prim
+   // Temporal AA: the anti-aliasing pass before the draw that reads the scene (the game's motion blur).
+   if (taa_pending_ && active_pixel_shader() && draw_) {
+     MetalDraw::TaaInputs inputs{&taa_vector_constants_, sizeof(taa_vector_constants_), {}, taa_camera_.reset,
+-        taa_up_.out_width, taa_up_.out_height, taa_up_.render_width, taa_up_.render_height, taa_frame_.up_state == 1};
++        taa_up_.out_width, taa_up_.out_height, taa_up_.render_width, taa_up_.render_height, taa_frame_.up_state == 1,
++        TaaProfileActive()};
+     TaaFsrJitter(inputs.jitter);
+     taa_frame_.status = draw_->TaaRun(inputs);
+     if (taa_frame_.status == '+') taa_frame_.done = true;
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index b0644ab..2a50f43 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -59,6 +59,9 @@ class MetalDraw {
+     // was drawn at the render size (else a render size below the output only makes the scaler for it).
+     uint32_t out_width, out_height, render_width, render_height;
+     bool squeezed;
++    // A title profile (temporal_aa_anchor_ps): the depth is the frame's last depth resolve of the scene's size
++    // (not the draw's fetch 2), and no stencil (one matrix for every pixel).
++    bool depth_from_resolve = false;
+   };
+   static bool TaaSupported(id<MTLDevice> device);
+   bool TaaReady(uint32_t out_width, uint32_t out_height, uint32_t render_width, uint32_t render_height) const {
+@@ -459,10 +462,15 @@ class MetalDraw {
+                  uint32_t x, uint32_t y0, uint32_t width, uint32_t y1);
+   id<MTLLibrary> helper_library_ = nil;
+   id taa_scaler_ = nil;  // id<MTLFXTemporalScaler>
++  // The frame's last depth resolve (at the origin of its surface), for a title profile's temporal AA.
++  id<MTLTexture> last_depth_resolve_ = nil;
++  uint64_t last_depth_resolve_frame_ = 0;
+   uint32_t taa_width_ = 0, taa_height_ = 0, taa_render_width_ = 0, taa_render_height_ = 0;
++  MTLPixelFormat taa_color_format_ = MTLPixelFormatInvalid;  // the scene's, which the scaler was made for
+   id<MTLTexture> taa_color_ = nil;  // upscaling: the render-size colour gathered from the stretched scene
+   id<MTLTexture> taa_motion_ = nil, taa_depth_ = nil, taa_output_ = nil;
+   id<MTLComputePipelineState> taa_vectors_pipeline_ = nil;
++  id<MTLComputePipelineState> taa_debug_pipeline_ = nil;  // metal_taa_debug_vectors
+   id<MTLRenderPipelineState> taa_depth_pipeline_ = nil;
+   id<MTLDepthStencilState> taa_depth_state_ = nil;
+   bool taa_failed_ = false;
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 0b6a2ca..4ee6673 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -87,6 +87,9 @@ REXCVAR_DEFINE_BOOL(metal_4x_as_1x, true, "GPU/Metal",
+     "MSAA 4x surfaces (the reflections) drawn at one sample a pixel instead of 2x2 supersampling: a quarter of their "
+     "pixel work, without their anti-aliasing (+5% FPS with MSAA 2x, +16% with MetalFX Performance)")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_BOOL(metal_taa_debug_vectors, false, "GPU/Metal",
++    "Temporal AA development: the motion vectors drawn in place of the anti-aliased scene (hue: direction, "
++    "brightness: length, full at 8 pixels)");
+ REXCVAR_DEFINE_BOOL(metal_2x_as_1x, true, "GPU/Metal",
+     "MSAA 2x surfaces drawn at one sample a pixel instead of 1x2 supersampling: half their pixel work, without their "
+     "anti-aliasing. FIFA 19's cut-scenes and replays draw their scene at 2x in two predicated tiles (1280x1440 "
+@@ -2301,9 +2304,11 @@ bool MetalDraw::Resolve() {
+           InvalidateRange(info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length);
+         for (auto& [a, r] : beside) resolved_.emplace(a, r);
+         if (constants.dx || constants.dy) Recycle(destination);  // kept by the command buffer until done
+-        else
++        else {
+           resolved_[address] = {destination, info.copy_dest_extent_start & 0x1FFFFFFF, info.copy_dest_extent_length,
+                                 width, height, resolved_format, resolved_pitch};
++          if (depth) { last_depth_resolve_ = destination; last_depth_resolve_frame_ = frame_; }
++        }
+         ++resolves_;
+         if (!resolve_verified_ && memory_buffer_ && frame_ >= 650 && dest_format == MTLPixelFormatRGBA8Unorm)
+           VerifyResolve(destination, info);
+@@ -2824,14 +2829,28 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+     MetalTextureBinding scene_binding{0, 0, xenos::FetchOpDimension::k2D, false};
+     MetalTextureBinding stencil_binding{0, 1, xenos::FetchOpDimension::k2D, false};
+     MetalTextureBinding depth_binding{0, 2, xenos::FetchOpDimension::k2D, false};
+-    id<MTLTexture> scene = Texture(scene_binding), stencil = Texture(stencil_binding), depth = Texture(depth_binding);
++    id<MTLTexture> scene = Texture(scene_binding), stencil = nil, depth = nil;
++    if (inputs.depth_from_resolve) {
++      // A title profile: the frame's last depth resolve, as a 2D array view (what the kernels read); no stencil,
++      // the same matrix in every slot (the depth stands in for it).
++      if (last_depth_resolve_ && last_depth_resolve_frame_ == frame_)
++        depth = [last_depth_resolve_ newTextureViewWithPixelFormat:last_depth_resolve_.pixelFormat
++            textureType:MTLTextureType2DArray levels:NSMakeRange(0, 1) slices:NSMakeRange(0, 1)];
++      stencil = depth;
++    } else {
++      stencil = Texture(stencil_binding); depth = Texture(depth_binding);
++    }
+     if (!scene || !stencil || !depth) return 't';
+     auto root = [](id<MTLTexture> t) { while (t.parentTexture) t = t.parentTexture; return t; };
+     id<MTLTexture> scene_base = root(scene), depth_base = root(depth);
++    // The scene's format: MCLA's is float (before its tone map); a title's may be 8-bit (after it).
++    const MTLPixelFormat color_format = scene_base.pixelFormat;
++    const bool color_ok = color_format == MTLPixelFormatRGBA16Float ||
++                          (inputs.depth_from_resolve && color_format == MTLPixelFormatRGBA8Unorm);
+     // The output (the scene textures' size) and the size the scene was drawn at.
+     const uint32_t width = inputs.out_width, height = inputs.out_height;
+     const uint32_t render_width = inputs.render_width, render_height = inputs.render_height;
+-    if (scene_base.pixelFormat != MTLPixelFormatRGBA16Float || depth_base.pixelFormat != MTLPixelFormatR32Float ||
++    if (!color_ok || depth_base.pixelFormat != MTLPixelFormatR32Float ||
+         scene_base.width != width || scene_base.height != height || depth_base.width != width ||
+         depth_base.height != height || stencil.width != width || stencil.height != height ||
+         !render_width || !render_height || render_width > width || render_height > height)
+@@ -2855,18 +2874,18 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+         return 'x';
+       }
+     }
+-    if (!TaaReady(width, height, render_width, render_height)) {
++    if (!TaaReady(width, height, render_width, render_height) || taa_color_format_ != color_format) {
+       // MetalFX's temporal scaler from the render size to the output: at the native size anti-aliasing only;
+       // with upscaling (temporal_aa_upscale) the scene is drawn into the render-size corner of its targets.
+       taa_scaler_ = nil;
+       auto desc = [MTLFXTemporalScalerDescriptor new];
+-      desc.colorTextureFormat = MTLPixelFormatRGBA16Float;
++      desc.colorTextureFormat = color_format;
+       desc.depthTextureFormat = MTLPixelFormatDepth32Float;
+       desc.motionTextureFormat = MTLPixelFormatRG16Float;
+-      desc.outputTextureFormat = MTLPixelFormatRGBA16Float;
++      desc.outputTextureFormat = color_format;
+       desc.inputWidth = render_width; desc.inputHeight = render_height;
+       desc.outputWidth = width; desc.outputHeight = height;
+-      desc.autoExposureEnabled = YES;  // the scene before the tone map
++      desc.autoExposureEnabled = color_format == MTLPixelFormatRGBA16Float;  // a scene before its tone map
+       id<MTLFXTemporalScaler> scaler = [desc newTemporalScalerWithDevice:device_];
+       if (!scaler) {
+         REXGPU_ERROR("Metal temporal AA: no MetalFX temporal scaler for {}x{} to {}x{}", render_width, render_height,
+@@ -2884,12 +2903,12 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+                             render_width, render_height);
+       taa_depth_ = texture(MTLPixelFormatDepth32Float, scaler.depthTextureUsage | MTLTextureUsageRenderTarget,
+                            render_width, render_height);
+-      taa_color_ = upscale ? texture(MTLPixelFormatRGBA16Float, scaler.colorTextureUsage | MTLTextureUsageShaderWrite,
++      taa_color_ = upscale ? texture(color_format, scaler.colorTextureUsage | MTLTextureUsageShaderWrite,
+                                      render_width, render_height) : nil;
+-      taa_output_ = texture(MTLPixelFormatRGBA16Float, scaler.outputTextureUsage, width, height);
++      taa_output_ = texture(color_format, scaler.outputTextureUsage | MTLTextureUsageShaderWrite, width, height);
+       if (!taa_motion_ || !taa_depth_ || !taa_output_ || (upscale && !taa_color_)) { taa_failed_ = true; return 'x'; }
+       taa_scaler_ = scaler; taa_width_ = width; taa_height_ = height;
+-      taa_render_width_ = render_width; taa_render_height_ = render_height;
++      taa_render_width_ = render_width; taa_render_height_ = render_height; taa_color_format_ = color_format;
+       REXGPU_INFO("Metal temporal AA: MetalFX temporal scaler ready for {}x{} to {}x{}", render_width, render_height,
+                   width, height);
+       inputs.reset = true;
+@@ -2903,9 +2922,12 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+       float previous[24 * 16];
+       float size[4], jitter[4];
+       uint32_t map[4];
++      float depth_map[4];
+     } constants;
+-    static_assert(sizeof(constants.previous) + 8 * sizeof(float) == sizeof(float) * (24 * 16 + 8));
+     std::memcpy(&constants, inputs.vector_constants, sizeof(float) * (24 * 16 + 8));
++    // CommandProcessor::TaaVectorConstants::depth_map follows its jitter.
++    std::memcpy(constants.depth_map, static_cast<const float*>(inputs.vector_constants) + 24 * 16 + 8,
++                sizeof(constants.depth_map));
+     constants.size[0] = float(render_width); constants.size[1] = float(render_height);
+     constants.size[2] = float(render_width) / float(regs_.GetTextureFetch(0).size_2d.width + 1);
+     constants.size[3] = float(render_height) / float(regs_.GetTextureFetch(0).size_2d.height + 1);
+@@ -2941,7 +2963,7 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+     }
+     // MetalFX reads 2D textures: a 2D view of the scene's first layer (or the colour gathered at the render size).
+     id<MTLTexture> color = upscale ? taa_color_ : scene_base.textureType == MTLTextureType2D ? scene_base
+-        : [scene_base newTextureViewWithPixelFormat:MTLPixelFormatRGBA16Float textureType:MTLTextureType2D
++        : [scene_base newTextureViewWithPixelFormat:color_format textureType:MTLTextureType2D
+                                              levels:NSMakeRange(0, 1) slices:NSMakeRange(0, 1)];
+     scaler.colorTexture = color;
+     scaler.depthTexture = taa_depth_;
+@@ -2952,6 +2974,18 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+     scaler.motionVectorScaleX = 1.0f; scaler.motionVectorScaleY = 1.0f;
+     scaler.reset = inputs.reset;
+     [scaler encodeToCommandBuffer:cb];
++    if (REXCVAR_GET(metal_taa_debug_vectors)) {
++      if (!taa_debug_pipeline_)
++        taa_debug_pipeline_ = [device_ newComputePipelineStateWithFunction:
++            [helper_library_ newFunctionWithName:@"taa_debug_vectors"] error:nil];
++      if (taa_debug_pipeline_) {
++        auto debug = [cb computeCommandEncoder];
++        [debug setComputePipelineState:taa_debug_pipeline_];
++        [debug setTexture:taa_motion_ atIndex:0]; [debug setTexture:taa_output_ atIndex:1];
++        [debug dispatchThreads:MTLSizeMake(width, height, 1) threadsPerThreadgroup:MTLSizeMake(16, 8, 1)];
++        [debug endEncoding];
++      }
++    }
+     // The anti-aliased scene in place of the scene, for the motion blur and anything after it.
+     auto blit = [cb blitCommandEncoder];
+     [blit copyFromTexture:taa_output_ sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+diff --git a/src/graphics/metal/metal_resolve.h b/src/graphics/metal/metal_resolve.h
+index 5e7460a..565b958 100644
+--- a/src/graphics/metal/metal_resolve.h
++++ b/src/graphics/metal/metal_resolve.h
+@@ -481,7 +481,8 @@ CLEAR_INTO_COLOR(3)
+ // render-size corner and resolved stretched to the output size: render pixel i is output pixel
+ // (2 * output * i + render - 1) / (2 * render), the first to show it, where the depth, the stencil and (when
+ // asked) the colour are taken from. At the native size that is pixel i itself.
+-struct TaaMvConstants { float4 previous[96]; float4 size; float4 jitter; uint4 map; };  // map: output w, h, render w, h
++// map: output w, h, render w, h; depth_map: the depth to clip z, z = depth * x + y (MCLA: 1 - depth).
++struct TaaMvConstants { float4 previous[96]; float4 size; float4 jitter; uint4 map; float4 depth_map; };
+ uint2 taa_source(uint2 i, uint4 map) { return min((i * map.xy * 2u + map.zw - 1u) / (map.zw * 2u), map.xy - 1u); }
+ kernel void taa_motion_vectors(constant TaaMvConstants& c [[buffer(0)]],
+     texture2d_array<float, access::read> depth [[texture(0)]], texture2d_array<float, access::read> stencil [[texture(1)]],
+@@ -496,7 +497,7 @@ kernel void taa_motion_vectors(constant TaaMvConstants& c [[buffer(0)]],
+   if (id >= 24u) id = 0u;
+   float2 position = float2(p) + 0.5f - c.jitter.xy;
+   float2 uv = position / c.size.xy;
+-  float4 clip = float4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 1.0f - d, 1.0f);
++  float4 clip = float4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, d * c.depth_map.x + c.depth_map.y, 1.0f);
+   uint row = id * 4u;
+   float4 previous = clip.x * c.previous[row] + clip.y * c.previous[row + 1u] + clip.z * c.previous[row + 2u] +
+                     clip.w * c.previous[row + 3u];
+@@ -509,6 +510,16 @@ kernel void taa_motion_vectors(constant TaaMvConstants& c [[buffer(0)]],
+   }
+   dest.write(float4(motion, 0.0f, 0.0f), p);
+ }
++// temporal AA development (metal_taa_debug_vectors): the motion vectors drawn in place of the anti-aliased
++// scene, hue the direction, brightness the length (full at 8 pixels).
++kernel void taa_debug_vectors(texture2d<float, access::read> motion [[texture(0)]],
++    texture2d<float, access::write> out [[texture(1)]], uint2 p [[thread_position_in_grid]]) {
++  if (p.x >= out.get_width() || p.y >= out.get_height()) return;
++  float2 m = motion.read(min(p, uint2(motion.get_width() - 1u, motion.get_height() - 1u))).xy;
++  float h = (atan2(m.y, m.x) / 6.2831853f + 0.5f) * 6.0f;
++  float3 hue = saturate(float3(abs(h - 3.0f) - 1.0f, 2.0f - abs(h - 2.0f), 2.0f - abs(h - 4.0f)));
++  out.write(float4(hue * saturate(length(m) / 8.0f), 1.0f), p);
++}
+ // The depth for MetalFX, which takes a depth format (at the render size, from the same pixels as the vectors).
+ struct TaaDepthOut { float depth [[depth(any)]]; };
+ fragment TaaDepthOut taa_depth_fs(float4 position [[position]], texture2d_array<float, access::read> source [[texture(0)]],
+diff --git a/src/graphics/temporal_aa.cpp b/src/graphics/temporal_aa.cpp
+index 807c7a7..b4143bc 100644
+--- a/src/graphics/temporal_aa.cpp
++++ b/src/graphics/temporal_aa.cpp
+@@ -21,7 +21,9 @@
+ #include <algorithm>
+ #include <atomic>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
++#include <string>
+ 
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+@@ -48,6 +50,16 @@ REXCVAR_DEFINE_STRING(temporal_aa_available, "unknown", "GPU",
+     .allowed({"unknown", "yes", "next_start", "no"})
+     .lifecycle(rex::cvar::Lifecycle::kHotReload)
+     .transient();
++REXCVAR_DEFINE_STRING(temporal_aa_anchor_ps, "", "GPU",
++                      "Temporal anti-aliasing for a title without guest markers (set by the title): the pixel "
++                      "shader (16 hex digits) of the first draw after the 3D scene that reads it (texture 0 is "
++                      "the scene); the pass runs before it. Empty: Midnight Club's markers and motion blur")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_STRING(temporal_aa_camera, "", "GPU",
++                      "With temporal_aa_anchor_ps: where the scene's vertex shaders keep the view-projection, "
++                      "comma-separated <vertex shader hash>:<constant> (clip = rows c[n] to c[n+3] dot the "
++                      "world position); the first of them drawn in a frame gives its camera")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_DOUBLE(temporal_aa_sharpness, 0.2, "GPU",
+                       "Temporal anti-aliasing: sharpening after FSR (RCAS), 0 (off) to 1")
+     .range(0.0, 1.0)
+@@ -296,7 +308,10 @@ void CommandProcessor::TaaJitterNdcOffset(xenos::PrimitiveType primitive_type,
+   }
+   float x_scale = regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_XSCALE);
+   uint32_t pitch = regs.Get<reg::RB_SURFACE_INFO>().surface_pitch;
+-  if (std::abs(std::abs(x_scale) * 2.0f - float(pitch)) > 1.0f) {
++  // The main view: as wide as the target, or (a title profile's scene, drawn in predicated tiles narrower than
++  // the view) at least as wide.
++  if (taa_profile_anchor_ ? std::abs(x_scale) * 2.0f + 1.0f < float(pitch)
++                          : std::abs(std::abs(x_scale) * 2.0f - float(pitch)) > 1.0f) {
+     return;
+   }
+   // The jitter is in pixels of the surface the draw is drawn at: the squeezed one when
+@@ -443,6 +458,10 @@ void CommandProcessor::TaaResolveStretch(const TaaResolveInfo& resolve, TaaStret
+ }
+ 
+ bool CommandProcessor::TaaCheckDraw() {
++  TaaProfileParse();
++  if (taa_profile_anchor_) {
++    return TaaProfileCheckDraw();
++  }
+   if (taa_frame_.mode == TaaMode::kOff || !taa_frame_.post || taa_frame_.done) {
+     return false;
+   }
+@@ -526,6 +545,8 @@ bool CommandProcessor::TaaCheckDraw() {
+   // The rest (the host size, the jitter) is the backend's.
+   constants.jitter[0] = taa_frame_.jitter[0];
+   constants.jitter[1] = taa_frame_.jitter[1];
++  constants.depth_map[0] = -1.0f;  // MCLA's depth: 1 near, 0 far, z = 1 - depth
++  constants.depth_map[1] = 1.0f;
+ 
+   // The projection (view inverse x view-projection): the planes' distances and
+   // the vertical field of view, for FSR's depth tests.
+@@ -640,6 +661,15 @@ void CommandProcessor::TaaEndFrame() {
+     TaaRelease();
+   }
+   TaaFrameEnd();
++  // A title profile's camera: this frame's is the next one's previous.
++  if (taa_profile_have_vp_) {
++    std::memcpy(taa_profile_prev_vp_, taa_profile_vp_, sizeof(taa_profile_vp_));
++    taa_profile_have_prev_ = true;
++  } else {
++    taa_profile_have_prev_ = false;
++  }
++  taa_profile_have_vp_ = false;
++  taa_profile_scene_seen_ = false;
+   TaaFrame frame;
+   // Under the option registry's lock: a title may set it from another thread.
+   frame.mode = rex::cvar::GetFlagByName("temporal_aa") == "fsr" ? TaaMode::kFsr : TaaMode::kOff;
+@@ -707,6 +737,178 @@ void CommandProcessor::TaaEndFrame() {
+   taa_frame_ = frame;
+ }
+ 
++void CommandProcessor::TaaProfileParse() {
++  if (taa_profile_parsed_) {
++    return;
++  }
++  taa_profile_parsed_ = true;
++  const std::string anchor = REXCVAR_GET(temporal_aa_anchor_ps);
++  if (anchor.empty()) {
++    return;
++  }
++  char* end = nullptr;
++  taa_profile_anchor_ = std::strtoull(anchor.c_str(), &end, 16);
++  if (!taa_profile_anchor_ || (end && *end)) {
++    REXGPU_WARN("Temporal AA: temporal_aa_anchor_ps '{}' is not a shader hash", anchor);
++    taa_profile_anchor_ = 0;
++    return;
++  }
++  const std::string camera = REXCVAR_GET(temporal_aa_camera);
++  size_t start = 0;
++  while (start < camera.size()) {
++    const size_t comma = camera.find(',', start);
++    const std::string entry =
++        camera.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
++    start = comma == std::string::npos ? camera.size() : comma + 1;
++    const size_t colon = entry.find(':');
++    if (colon == std::string::npos) {
++      continue;
++    }
++    const uint64_t hash = std::strtoull(entry.substr(0, colon).c_str(), nullptr, 16);
++    const uint32_t constant = uint32_t(std::strtoul(entry.substr(colon + 1).c_str(), nullptr, 10));
++    if (hash && constant <= 252) {
++      taa_profile_camera_.emplace_back(hash, constant);
++    }
++  }
++  REXGPU_INFO("Temporal AA: title profile, anchor pixel shader {:016X}, {} camera vertex shaders",
++              taa_profile_anchor_, taa_profile_camera_.size());
++}
++
++void CommandProcessor::TaaProfileBeforeDraw() {
++  TaaProfileParse();
++  if (!taa_profile_anchor_ || taa_frame_.mode == TaaMode::kOff) {
++    return;
++  }
++  const RegisterFile& regs = *register_file_;
++  if (regs.Get<reg::RB_MODECONTROL>().edram_mode != xenos::EdramMode::kColorDepth) {
++    return;
++  }
++  const bool msaa_2x = regs.Get<reg::RB_SURFACE_INFO>().msaa_samples == xenos::MsaaSamples::k2X;
++  const auto primitive = regs.Get<reg::VGT_DRAW_INITIATOR>().prim_type;
++  if (msaa_2x && primitive != xenos::PrimitiveType::kRectangleList) {
++    // The scene's first draw (once a frame: a tiled scene replays its draws per tile).
++    if (!taa_frame_.in_scene && !taa_profile_scene_seen_) {
++      taa_frame_.in_scene = true;
++      taa_profile_scene_seen_ = true;
++    }
++  } else if (taa_frame_.in_scene && !msaa_2x) {
++    // A colour draw on another surface: the scene is complete.
++    taa_frame_.in_scene = false;
++    taa_frame_.post = true;
++  }
++  if (!taa_frame_.in_scene || taa_profile_have_vp_) {
++    return;
++  }
++  Shader* vertex_shader = active_vertex_shader();
++  if (!vertex_shader) {
++    return;
++  }
++  const uint64_t hash = vertex_shader->ucode_data_hash();
++  for (const auto& [camera_hash, first] : taa_profile_camera_) {
++    if (camera_hash != hash) {
++      continue;
++    }
++    // clip[i] = dot(c[first + i], position): as row vectors, VP[j][i] = c[first + i][j].
++    for (uint32_t i = 0; i < 4; ++i) {
++      for (uint32_t j = 0; j < 4; ++j) {
++        float value;
++        const uint32_t bits = regs[XE_GPU_REG_SHADER_CONSTANT_000_X + (first + i) * 4 + j];
++        std::memcpy(&value, &bits, sizeof(value));
++        taa_profile_vp_[j][i] = double(value);
++      }
++    }
++    // The depth back to clip z (depth = z * scale + offset).
++    const auto vte = regs.Get<reg::PA_CL_VTE_CNTL>();
++    const float z_scale = vte.vport_z_scale_ena ? regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_ZSCALE) : 1.0f;
++    const float z_offset = vte.vport_z_offset_ena ? regs.Get<float>(XE_GPU_REG_PA_CL_VPORT_ZOFFSET) : 0.0f;
++    if (std::abs(z_scale) > 1e-6f) {
++      taa_profile_depth_map_[0] = 1.0f / z_scale;
++      taa_profile_depth_map_[1] = -z_offset / z_scale;
++    }
++    taa_profile_have_vp_ = true;
++    break;
++  }
++}
++
++bool CommandProcessor::TaaProfileCheckDraw() {
++  if (taa_frame_.mode == TaaMode::kOff || !taa_frame_.post || taa_frame_.done) {
++    return false;
++  }
++  const RegisterFile& regs = *register_file_;
++  if (regs.Get<reg::RB_MODECONTROL>().edram_mode != xenos::EdramMode::kColorDepth) {
++    return false;
++  }
++  Shader* pixel_shader = active_pixel_shader();
++  if (!pixel_shader || pixel_shader->ucode_data_hash() != taa_profile_anchor_) {
++    return false;
++  }
++  taa_frame_.post = false;
++  taa_frame_.status = 'f';  // the anchor found, its scene fetch not a 2D texture
++  const xenos::xe_gpu_texture_fetch_t fetch = regs.GetTextureFetch(kTaaFetchScene);
++  if (fetch.type != xenos::FetchConstantType::kTexture ||
++      fetch.dimension != xenos::DataDimension::k2DOrStacked) {
++    return false;
++  }
++  const uint32_t width = fetch.size_2d.width + 1, height = fetch.size_2d.height + 1;
++  taa_frame_.status = 'i';  // no camera seen in the scene, or not invertible
++  Mat4 inverse;
++  if (!taa_profile_have_vp_ || !TaaInverse(taa_profile_vp_, inverse)) {
++    return false;
++  }
++  taa_up_.out_width = width;
++  taa_up_.out_height = height;
++  TaaUpscaleSizes(taa_frame_.mode == TaaMode::kFsr, taa_frame_.up_ratio);
++  // The previous frame's view-projection to its guest pixels (x = w/2 (x + w), y = h/2 (w - y)); without
++  // one, this frame's (no motion).
++  const auto& previous_vp = taa_profile_have_prev_ ? taa_profile_prev_vp_ : taa_profile_vp_;
++  const Mat4 to_pixels = {{0.5 * width, 0.0, 0.0, 0.0},
++                          {0.0, -0.5 * height, 0.0, 0.0},
++                          {0.0, 0.0, 1.0, 0.0},
++                          {0.5 * width, 0.5 * height, 0.0, 1.0}};
++  Mat4 previous, combined;
++  TaaMul(previous_vp, to_pixels, previous);
++  TaaMul(inverse, previous, combined);
++  TaaVectorConstants& constants = taa_vector_constants_;
++  for (uint32_t k = 0; k < 24; ++k) {
++    for (uint32_t i = 0; i < 4; ++i) {
++      for (uint32_t j = 0; j < 4; ++j) {
++        constants.previous[k][i][j] = float(combined[i][j]);
++      }
++    }
++  }
++  constants.jitter[0] = taa_frame_.jitter[0];
++  constants.jitter[1] = taa_frame_.jitter[1];
++  constants.depth_map[0] = taa_profile_depth_map_[0];
++  constants.depth_map[1] = taa_profile_depth_map_[1];
++  // A cut (the screen's centre at mid depth moved more than a third of the width since the last frame, or
++  // went behind the camera): the history is dropped.
++  TaaCamera& camera = taa_camera_;
++  camera.reset = !taa_last_done_ || !taa_profile_have_prev_;
++  {
++    const double centre[4] = {0.0, 0.0, 0.5, 1.0};
++    double moved[4] = {};
++    for (uint32_t j = 0; j < 4; ++j) {
++      for (uint32_t i = 0; i < 4; ++i) {
++        moved[j] += centre[i] * combined[i][j];
++      }
++    }
++    if (moved[3] <= 1e-9 || std::abs(moved[0] / moved[3] - 0.5 * width) > width / 3.0 ||
++        std::abs(moved[1] / moved[3] - 0.5 * height) > width / 3.0) {
++      camera.reset = true;
++    }
++  }
++  const uint64_t now = rex::chrono::Clock::QueryHostTickCount();
++  if (taa_last_time_) {
++    const double ms =
++        double(now - taa_last_time_) * 1000.0 / double(rex::chrono::Clock::QueryHostTickFrequency());
++    taa_frame_time_ms_ = float(std::clamp(ms, 1.0, 100.0));
++  }
++  taa_last_time_ = now;
++  taa_frame_.status = 'b';  // the backend's turn
++  taa_frame_.hook = true;
++  return true;
++}
++
+ }  // namespace rex::graphics
+ 
+ #if defined(REX_HAS_FSR) && REX_HAS_FSR
+-- 
+2.56.0
+

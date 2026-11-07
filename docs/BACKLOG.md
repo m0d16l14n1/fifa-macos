@@ -38,11 +38,9 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item |
 |---|---|
-| T1 | Locate the match's scene colour before UI and post effects (shader hash of the tone map or bloom composite) |
-| T2 | Locate the scene depth and its format at that point |
-| T3 | Locate the camera: view-projection this frame and last, jitter if any (constant logs of the scene shaders) |
-| T4 | Wire T1-T3 into the backend's temporal path (as MCLA's motion-blur hook), behind `fifa19_temporal` |
-| T5 | MetalFX temporal AA; then frame interpolation (macOS 26), UI drawn apart |
+| T5 | MetalFX temporal AA is soft in FIFA (half the local contrast of the picture without it, with or without jitter, the camera still): find whether a sub-pixel camera sway or the scaler at 1:1 does it; a sharpening pass after it | `taa*` runs, `out/tools/sharp.py` |
+| T6 | FIFA's tone map and HUD for the UI layer (synthesized guest markers: tone map at `C4F1B7FC`, UI at `00801335`), then MetalFX frame interpolation for the 30 FPS cut-scenes (2 refreshes a frame on a 60 Hz display) |
+| T7 | The players' own motion in the vectors (their skinning with last frame's bone constants) for TAA and interpolation without trails |
 | R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
 
@@ -64,4 +62,5 @@ how it is checked. Done items move to the end with their date.
 | D13 | Lost wakeups in multi-object waits (`patches/fifa/0016`): an event set and reset or pulsed between two polls of KeWaitForMultipleObjects was missed, and one boot in 18 stuck before the intro movie with the audio worker in such a wait. Multi-object waits are now registered on their events, Pulse is atomic, and they wake ~14 us after a set instead of ~650 us (`scripts/test_sdk.sh`); 15 boots since, all to the menu; matches at 60 Hz within the noise of the build before it | 2026-11-07 |
 | D15 | Judder (seen as the crowd stuttering when the camera pans): the guest vblank on the display's refreshes (`gpu_vblank_display_sync`, `patches/fifa/0020`), FIFA's default. A match on a 60 Hz display: 60.0 frames shown a second, none repeated or dropped, each advancing 16.66 ms +-0.37 (uncapped at 240 Hz: ~80 FPS made, 12-24 ms a refresh). Measured from `present_log` with `scripts/present_stats.py` | 2026-11-08 |
 | D16 | Cut-scenes cheaper (`patches/fifa/0018`): MSAA 2x drawn as 1x (the walk-out's scene tiles, a third of the GPU) and static linear textures hashed less (27 -> 5-8 MB a frame): the walk-out from 17-31 uneven FPS to an even 30 synced (P6 for 60) | 2026-11-08 |
+| D17 | MetalFX temporal AA in FIFA (T1-T4): the scene, depth and camera found in a match frame (METAL.md), wired through the SDK's new title profile (`patches/fifa/0021`): `fifa19_temporal_aa` | 2026-11-08 |
 | D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |

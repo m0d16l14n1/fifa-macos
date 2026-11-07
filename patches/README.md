@@ -40,6 +40,7 @@ on its own, as a patch in `fifa/`, after it has been tested in FIFA.
 | `0018` cheaper cut-scenes | `metal_2x_as_1x`: MSAA 2x surfaces at one sample a pixel (FIFA's walk-out and replays draw their scene at 2x in two predicated tiles: 1280x1440 pixels shaded, a third of the GPU); `metal_linear_hash_max_us`: a linear texture found unchanged is hashed again less and less often, up to 100 ms (27 MB of static faces and kits hashed a frame before); a texture cache flush is logged. |
 | `0019` burst capture | `metal_present_capture_burst`: the next N presented frames each captured (the dev pad's `burst`), for what shows for a frame or two. |
 | `0020` display-synced vblank | `gpu_vblank_display_sync` (macOS): the guest vblank from a CoreVideo display link, one per display refresh, so each refresh shows the next game frame (FIFA's default; a 60 Hz match: none repeated or dropped, 16.66 ms +-0.37 a refresh). |
+| `0021` temporal AA title profile | `temporal_aa_anchor_ps`, `temporal_aa_camera`: temporal AA for a title without guest markers. The scene is the MSAA 2x draws (jittered, predicated tiles included), the camera the view-projection in named vertex shaders' constants (last frame's kept), the pass runs before the anchor pixel shader with the frame's last depth resolve; Metal takes the depth map from the viewport and the scene's own colour format; `metal_taa_debug_vectors` shows the vectors. |
 
 ## Changing the SDK
 

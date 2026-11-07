@@ -102,13 +102,26 @@ What made matches fast (from 26-39 ms a frame before):
 |---|---|
 | Metal 3 renderer (command buffers, render/compute/blit encoders, no-copy guest memory, shader/pipeline storage) | in use |
 | MetalFX **spatial** upscaling at present | in use (FIFA's patch) |
-| MetalFX **temporal** AA / upscaling (`MTLFXTemporalScaler`) | in the backend, keyed to MCLA's motion-blur shader for its camera matrices and depth: **not active in FIFA** until FIFA's scene pass, depth and camera constants are found (BACKLOG) |
-| MetalFX **frame interpolation** (`MTLFXFrameInterpolator`, macOS 26) | in the backend, needs the temporal path (motion vectors, depth) and the UI drawn apart: **not active in FIFA** (BACKLOG) |
-| HDR (EDR, HDR10 metadata) | in the backend, needs FIFA's tone map located (BACKLOG) |
+| MetalFX **temporal** AA (`MTLFXTemporalScaler`) | **works, off by default** (`fifa19_temporal_aa`, launcher: Temporal anti-aliasing): the SDK's title profile (`patches/fifa/0021`) runs it every match frame at 60 FPS; less shimmer, but softer than without (the grass's fine texture is smoothed). Players' own motion is not in the vectors (camera only) |
+| MetalFX temporal **upscaling** | not useful as is: the game's post effects and HUD are drawn at 720p after the scene, so the scene can't be upscaled past 1280x720 there (BACKLOG R1) |
+| MetalFX **frame interpolation** (`MTLFXFrameInterpolator`, macOS 26) | in the backend, built on the HDR UI layer (the picture without the HUD interpolated, the HUD on top): needs FIFA's tone map and HUD located for it (BACKLOG T6) |
+| HDR (EDR, HDR10 metadata) | in the backend, needs FIFA's tone map and HUD located (BACKLOG T6) |
 | Metal 4 (`MTL4CommandQueue`, argument tables, residency sets, `MTL4FX`) | **not in this base**: MCLA's Metal 4 work came after `ef468c4` and is left out; planned again from scratch for FIFA (PLAN, M6) |
 
-The temporal and frame-generation paths need three things from the game, per frame: the scene colour before
-the UI and post effects, its depth, and the camera (this frame's and last frame's view-projection, and the jitter
-if any). For MCLA those come from its motion-blur pass. For FIFA they are to be found by reverse engineering the
-match renderer (`docs/DEBUGGING.md`: shader dumps by hash, `metal_debug_frame` texture lists); BACKLOG items T1-T4
-track it.
+### FIFA's frame, for the temporal paths (match, 2026-11-08)
+
+From a frame dump (`metal_debug_capture`, `metal_debug_all_draws`) and the shaders' microcode (`dump_shaders`):
+
+1. Pre-passes (512x512 and a 1280x720 pass the scene samples), shadows.
+2. **The scene**: MSAA 2x in two predicated tiles 640 pixels wide (~225 draws each, viewport 1280x720, reversed
+   depth: viewport z 0.5 to 0, greater-or-equal). Each tile resolves its colour to `1B5A5000` (k_8_8_8_8) and
+   depth to `1DC15000` (k_24_8_FLOAT); a full-screen pass copies the depth back and it is resolved 1280x720.
+3. Luminance down to 1x1 (adaptation), then **the composite** (pixel shader `C4F1B7FC4C922703`, texture 0 the
+   scene): the temporal pass's anchor.
+4. Depth-tested sprites over it (`7ABDFEFB`: player markers), the grade (`5BE4F29C`), the HUD (`00801335`), the
+   final resolve to the front buffer.
+
+The camera: the scene's vertex shaders end in `clip = VP x world`. The players' (`443F0A79`, skinned straight to
+world space) keep VP in c1-c4 and the camera's position in c0; the skinned props (`EC79FAF2`, `71347B6C`) in
+c0-c3 after a world matrix in c32-c35 (c145 the camera's position). One of them is drawn in every match frame.
+
