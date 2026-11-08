@@ -31,6 +31,7 @@ struct Paths {
 
 @MainActor
 final class Game: ObservableObject {
+    static let shared = Game()
     let paths = Paths.current()
     @Published private(set) var config = TomlFile(text: "")
     @Published private(set) var running: Process?

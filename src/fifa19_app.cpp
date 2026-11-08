@@ -152,8 +152,10 @@ REXCVAR_DECLARE(std::string, cache_root);
 
 namespace {
 
-// ~/Library/Application Support/FIFA 19: the profile and saves, the shader caches and fifa19.toml.
+// ~/Library/Application Support/FIFA 19: the profile and saves, the shader caches and fifa19.toml. FIFA19_SUPPORT
+// (the launcher's, passed on to the game) puts them elsewhere: test runs use their own (scripts/run_app.sh).
 std::filesystem::path SupportFolder() {
+  if (const char* support = std::getenv("FIFA19_SUPPORT"); support && *support) return support;
   const char* home = std::getenv("HOME");
   return std::filesystem::path(home ? home : ".") / "Library" / "Application Support" / "FIFA 19";
 }

@@ -204,6 +204,7 @@ private struct KeyField: View {
 // The Quick Match choices: the game's own ids for its stadiums, lighting and weather.
 enum QuickMatch {
     static let stadiums: [(value: Int, label: String)] = [(-1, "The game picks")]
-    static let times: [(value: Int, label: String)] = [(-1, "The stadium's own")]
-    static let weathers: [(value: Int, label: String)] = [(0, "Clear"), (1, "Overcast"), (2, "Rain"), (3, "Snow")]
+    // The stadium's lighting (STADIUM_LIGHT_TYPE_ID): every stadium has these two.
+    static let times: [(value: Int, label: String)] = [(-1, "The game picks"), (1, "Day"), (3, "Night")]
+    static let weathers: [(value: Int, label: String)] = [(0, "Clear"), (1, "Rain"), (2, "Snow"), (3, "Overcast")]
 }

@@ -31,11 +31,14 @@ REXCVAR_DEFINE_BOOL(fifa19_quick_match, false, "FIFA19",
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_INT32(fifa19_match_stadium, -1, "FIFA19", "Quick match: the stadium's id (-1: the game picks)");
 REXCVAR_DEFINE_INT32(fifa19_match_time, -1, "FIFA19",
-                     "Quick match: the time of day (the stadium's lighting id; -1: the stadium's own)");
-REXCVAR_DEFINE_INT32(fifa19_match_weather, 0, "FIFA19", "Quick match: the weather (0 clear, 1 overcast, 2 rain, 3 snow)");
+                     "Quick match: 1 day, 3 night (the stadium's lighting, STADIUM_LIGHT_TYPE_ID: the two every "
+                     "stadium has; -1: the game picks)");
+REXCVAR_DEFINE_INT32(fifa19_match_weather, 0, "FIFA19", "Quick match: the weather (0 clear, 1 rain, 2 snow, 3 overcast)");
 REXCVAR_DEFINE_INT32(fifa19_match_half_length, 4, "FIFA19", "Quick match: minutes a half");
 REXCVAR_DEFINE_INT32(fifa19_match_home_team, -1, "FIFA19", "Quick match: the home team's id (-1: random)");
 REXCVAR_DEFINE_INT32(fifa19_match_away_team, -1, "FIFA19", "Quick match: the away team's id (-1: random)");
+REXCVAR_DEFINE_INT32(fifa19_match_seed, 1, "FIFA19",
+                     "Quick match: the AI's random seed, so two runs play the same match (0: the game's own)");
 
 REX_EXTERN(__imp__sub_8242ADF8);
 
@@ -52,12 +55,17 @@ std::string Spec() {
   if (REXCVAR_GET(fifa19_quick_match)) {
     spec = fmt::format(
         "SKIP_BOOTFLOW=1,BOOT_TO_MENU=0,FREE_ROAM_AUTOMATCH/ON=1,FREE_ROAM_AUTOMATCH/ENABLED=1,"
-        "FREE_ROAM_AUTOMATCH/TIMEOUT=1,FREE_ROAM_AUTOMATCH/STADIUM_ID={},FREE_ROAM_AUTOMATCH/STADIUM_TOD={},"
+        "FREE_ROAM_AUTOMATCH/TIMEOUT=1,FREE_ROAM_AUTOMATCH/STADIUM_ID={},{}"
         "FREE_ROAM_AUTOMATCH/WEATHER_TYPE={},FREE_ROAM_AUTOMATCH/HALF_LENGTH={},FREE_ROAM_AUTOMATCH/HOME_TEAM_ID={},"
-        "FREE_ROAM_AUTOMATCH/AWAY_TEAM_ID={},",
-        REXCVAR_GET(fifa19_match_stadium), REXCVAR_GET(fifa19_match_time), REXCVAR_GET(fifa19_match_weather),
+        "FREE_ROAM_AUTOMATCH/AWAY_TEAM_ID={},{}",
+        REXCVAR_GET(fifa19_match_stadium),
+        REXCVAR_GET(fifa19_match_time) > 0 ? fmt::format("STADIUM_LIGHT_TYPE_ID={},", REXCVAR_GET(fifa19_match_time))
+                                           : std::string(),
+        REXCVAR_GET(fifa19_match_weather),
         REXCVAR_GET(fifa19_match_half_length), REXCVAR_GET(fifa19_match_home_team),
-        REXCVAR_GET(fifa19_match_away_team));
+        REXCVAR_GET(fifa19_match_away_team),
+        REXCVAR_GET(fifa19_match_seed) ? fmt::format("FREE_ROAM_AUTOMATCH/AI_RANDOMSEED={},", REXCVAR_GET(fifa19_match_seed))
+                                       : std::string());
   }
   return spec + REXCVAR_GET(fifa19_ini);
 }
@@ -105,14 +113,26 @@ REX_HOOK_RAW(sub_8242ADF8) {
   }
 }
 
-// The quick match's time of day is checked against the stadium's own (its timeofday1..4 in the game's database,
-// sub_82AFA310(stadium, tod) -> bool); one it doesn't have is replaced by the stadium's pick (sub_82B00AB0). Logged
-// with fifa19_ini_log, to see the values a stadium accepts.
+// FREE_ROAM_AUTOMATCH/STADIUM_TOD (not the lighting: every stadium takes 1, 3 and 5, all daylight; the lighting
+// is STADIUM_LIGHT_TYPE_ID, 1 day and 3 night, above) is checked against the stadium's own (timeofday1..4 in the
+// game's database, sub_82AFA310(stadium, tod) -> bool); one it doesn't have is replaced by the stadium's pick
+// (sub_82B00AB0). Logged with fifa19_ini_log.
 REX_EXTERN(__imp__sub_82AFA310);
 REX_EXTERN(__imp__sub_82B00AB0);
 
 REX_HOOK_RAW(sub_82AFA310) {
   const int32_t tod = ctx.r4.s32;
+  if (REXCVAR_GET(fifa19_ini_log)) {
+    // Every value the stadium takes (the check only reads the game's database).
+    std::string valid;
+    for (int32_t value = 0; value < 9; ++value) {
+      PPCContext probe = ctx;
+      probe.r4.s64 = value;
+      __imp__sub_82AFA310(probe, base);
+      if (probe.r3.u32 & 0xFF) valid += fmt::format(" {}", value);
+    }
+    REXLOG_INFO("fifa19: the stadium's times of day:{}", valid);
+  }
   __imp__sub_82AFA310(ctx, base);
   if (REXCVAR_GET(fifa19_ini_log)) REXLOG_INFO("fifa19: time of day {} for the stadium: {}", tod, ctx.r3.u32 & 0xFF ? "valid" : "not valid");
 }

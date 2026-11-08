@@ -19,8 +19,8 @@ a minute after start. Its settings:
 | Option | Key | Values |
 |---|---|---|
 | `fifa19_match_stadium` | `FREE_ROAM_AUTOMATCH/STADIUM_ID` | the stadium's id (1 Old Trafford; the ids are those of `data/ui/imgassets/stadiumsbig/stadium_<id>_<lighting>.dds`); -1 the game picks |
-| `fifa19_match_time` | `FREE_ROAM_AUTOMATCH/STADIUM_TOD` | the lighting: 0 day, 1, 3, 4 (below); -1 the stadium's own |
-| `fifa19_match_weather` | `FREE_ROAM_AUTOMATCH/WEATHER_TYPE` | 0 clear, 1 overcast, 2 rain, 3 snow |
+| `fifa19_match_time` | `STADIUM_LIGHT_TYPE_ID` | 1 day, 3 night: the two lightings every stadium has (`crowdplacement/crowd_<id>_<1\|3>.dat`; 0, 2 and 4 draw placeholder textures). `FREE_ROAM_AUTOMATCH/STADIUM_TOD` is something else: every stadium takes 1, 3 and 5, all daylight |
+| `fifa19_match_weather` | `FREE_ROAM_AUTOMATCH/WEATHER_TYPE` | 0 clear, 1 rain, 2 snow, 3 overcast (the game's own order: CLR, RAN, SNW, OCS) |
 | `fifa19_match_half_length` | `FREE_ROAM_AUTOMATCH/HALF_LENGTH` | minutes |
 | `fifa19_match_home_team`, `_away_team` | `FREE_ROAM_AUTOMATCH/HOME_TEAM_ID`, `AWAY_TEAM_ID` | team ids; -1 random |
 

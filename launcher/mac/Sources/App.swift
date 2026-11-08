@@ -22,9 +22,20 @@ enum Page: String, CaseIterable, Identifiable {
     }
 }
 
+// Tests (FIFA19_LAUNCHER_PLAY=1): the game starts when the launcher has finished launching, with or without a
+// window (macOS may restore none).
+final class LauncherDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard Game.testEnv["FIFA19_LAUNCHER_PLAY"] == "1" else { return }
+        if Game.testEnv["FIFA19_LAUNCHER_BACKGROUND"] == "1" { NSApp.setActivationPolicy(.accessory) }
+        Task { @MainActor in Game.shared.play() }
+    }
+}
+
 @main
 struct LauncherApp: App {
-    @StateObject private var game = Game()
+    @NSApplicationDelegateAdaptor(LauncherDelegate.self) private var delegate
+    @StateObject private var game = Game.shared
     @State private var page: Page? = Page(rawValue: ProcessInfo.processInfo.environment["FIFA19_LAUNCHER_PAGE"] ?? "") ?? .play
 
     var body: some Scene {
@@ -134,10 +145,6 @@ struct PlayPage: View {
         .onReceive(timer) { _ in logTail = Game.tail(of: game.paths.log, lines: 12) }
         .onAppear {
             logTail = Game.tail(of: game.paths.log, lines: 12)
-            if Game.testEnv["FIFA19_LAUNCHER_PLAY"] == "1" {
-                if Game.testEnv["FIFA19_LAUNCHER_BACKGROUND"] == "1" { NSApp.setActivationPolicy(.accessory) }
-                game.play()
-            }
         }
     }
 }
