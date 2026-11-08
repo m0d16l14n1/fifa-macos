@@ -32,3 +32,14 @@ __pycache__/
 
 # Captures from test runs (dev pad shots, metal_present_capture) anywhere in the tree
 *.ppm
+
+# Mods and their data: built mods, fetched squads and logos, unpacked game files (scripts and configs are in
+# tools/modding; what they make stays local)
+/mods/
+/downloaded_files/
+*.rx3
+*.dds
+*.db
+*-meta.xml
+# The PC game's squads saves (an update's file: Squads<date>), wherever one is put
+Squads[0-9]*

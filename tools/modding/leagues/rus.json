@@ -1,0 +1,200 @@
+{
+  "comment": "Russian Premier League from ESPN (rus.1), 2026/27. CSKA, Lokomotiv and Spartak exist in the game (Rest of World) and keep their kits, crests and ids.",
+  "source_league": "rus.1",
+  "seasons": [
+    "2026",
+    "2025"
+  ],
+  "today": "2026-11-08",
+  "age_shift_years": 8,
+  "league_id": 67,
+  "nation_id": 40,
+  "database_name": "Russia Premier League (1)",
+  "template_league_id": 68,
+  "template_team_id": 315,
+  "formation_from_team": 1,
+  "first_team_id": 120000,
+  "first_player_id": 260000,
+  "free_agents_team_id": 111592,
+  "team_rating_range": [
+    64,
+    74
+  ],
+  "league_strings": {
+    "LeagueName_{id}": "Russian Premier League",
+    "LeagueName_Abbr15_{id}": "Premier League",
+    "Labbr_{id}": "RUS 1",
+    "Labbr_{id}_upper": "RUS 1",
+    "TrophyName_{id}": "Russian Premier League",
+    "TrophyName_Abbr15_{id}": "RPL"
+  },
+  "existing_teams": {
+    "1963": 315,
+    "442": 100765,
+    "1941": 100767
+  },
+  "team_names": {
+    "2533": {
+      "name": "Zenit St. Petersburg",
+      "short": "Zenit",
+      "abbr3": "ZEN"
+    },
+    "21949": {
+      "name": "Baltika Kaliningrad",
+      "short": "Baltika",
+      "abbr3": "BAL"
+    },
+    "596": {
+      "name": "Dynamo Moscow",
+      "short": "Dynamo",
+      "abbr3": "DIN"
+    },
+    "22300": {
+      "name": "Dynamo Makhachkala",
+      "short": "Makhachkala",
+      "abbr3": "DMA"
+    },
+    "18285": {
+      "name": "Orenburg",
+      "short": "Orenburg",
+      "abbr3": "ORE"
+    },
+    "3850": {
+      "name": "Krylia Sovetov",
+      "short": "Krylia",
+      "abbr3": "KRY"
+    },
+    "2991": {
+      "name": "Akhmat Grozny",
+      "short": "Akhmat",
+      "abbr3": "AKH"
+    },
+    "22271": {
+      "name": "Akron Tolyatti",
+      "short": "Akron",
+      "abbr3": "AKR"
+    },
+    "21539": {
+      "name": "Fakel Voronezh",
+      "short": "Fakel",
+      "abbr3": "FAK"
+    },
+    "21927": {
+      "name": "Rodina Moscow",
+      "short": "Rodina",
+      "abbr3": "ROD"
+    },
+    "11336": {
+      "name": "Krasnodar",
+      "short": "Krasnodar",
+      "abbr3": "KRA"
+    },
+    "3852": {
+      "name": "Rostov",
+      "short": "Rostov",
+      "abbr3": "ROS"
+    },
+    "3851": {
+      "name": "Rubin Kazan",
+      "short": "Rubin",
+      "abbr3": "RUB"
+    }
+  },
+  "stadium_names": {
+    "2533": "Gazprom Arena",
+    "596": "VTB Arena",
+    "11336": "Krasnodar Stadium",
+    "3852": "Rostov Arena",
+    "3851": "Ak Bars Arena",
+    "2991": "Akhmat Arena",
+    "3850": "Solidarnost Samara Arena",
+    "21539": "Fakel Stadium",
+    "21949": "Kaliningrad Stadium",
+    "22300": "Anzhi Arena"
+  },
+  "coaches": {},
+  "generic_stadiums": [
+    34,
+    228,
+    176,
+    178,
+    193,
+    249,
+    180,
+    33,
+    179,
+    197,
+    32,
+    158
+  ],
+  "kit_donor_leagues": [
+    1,
+    41,
+    56,
+    66,
+    80,
+    189,
+    65,
+    50
+  ],
+  "kit_donors": {},
+  "compdata": {
+    "template_nation": 1430,
+    "template_league": 1431,
+    "nation_code": "RUSS",
+    "weather": {
+      "11": [
+        30,
+        25,
+        25,
+        20
+      ],
+      "12": [
+        30,
+        5,
+        50,
+        15
+      ],
+      "1": [
+        30,
+        5,
+        50,
+        15
+      ],
+      "2": [
+        30,
+        5,
+        45,
+        20
+      ],
+      "3": [
+        40,
+        15,
+        25,
+        20
+      ]
+    }
+  },
+  "referees": [
+    [
+      "Sergei",
+      "Karasev"
+    ],
+    [
+      "Vladimir",
+      "Moskalev"
+    ],
+    [
+      "Kirill",
+      "Levnikov"
+    ],
+    [
+      "Sergei",
+      "Ivanov"
+    ]
+  ],
+  "league_logos": {
+    "light": "https://a.espncdn.com/i/leaguelogos/soccer/500/106.png",
+    "dark": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/106.png"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "comment": "The game's leagues and ESPN's codes for them, for the squads update (MOD3). ESPN has no squads for Poland (66), Ireland (65), Korea (83) or the German 3. Liga (2076): those keep the game's.",
+  "today": "2026-11-08",
+  "age_shift_years": 8,
+  "first_player_id": 260000,
+  "free_agents_team_id": 111592,
+  "team_ids": {
+    "esp.1": { "93": 448 },
+    "ger.1": { "122": 31 },
+    "ned.1": { "140": 1906 },
+    "nor.1": { "5270": 418 },
+    "usa.1": { "190": 689, "186": 696 },
+    "mex.1": { "233": 1881 },
+    "bra.1": { "7632": 1035 },
+    "col.1": { "4815": 101101 },
+    "jpn.1": { "3384": 101150 }
+  },
+  "leagues": {
+    "13": "eng.1", "14": "eng.2", "60": "eng.3", "61": "eng.4",
+    "53": "esp.1", "54": "esp.2",
+    "19": "ger.1", "20": "ger.2",
+    "31": "ita.1", "32": "ita.2",
+    "16": "fra.1", "17": "fra.2",
+    "10": "ned.1", "308": "por.1", "4": "bel.1", "68": "tur.1", "50": "sco.1", "80": "aut.1", "189": "sui.1",
+    "1": "den.1", "41": "nor.1", "56": "swe.1",
+    "39": "usa.1", "341": "mex.1", "7": "bra.1", "353": "arg.1", "335": "chi.1", "336": "col.1",
+    "349": "jpn.1", "350": "ksa.1", "351": "aus.1"
+  }
+}

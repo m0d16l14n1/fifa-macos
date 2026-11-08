@@ -59,6 +59,10 @@ def read_meta(path):
     return tables
 
 
+# A table's record counts are 16-bit. The meta's maxinsert is no limit: the game boots with
+# 8,000 more players and links than the table had and 5,000 more names (maxinsert 3282, and none for names).
+MAX_RECORDS = 65535
+
 # Fields whose record holds a 32-bit offset into the string block: 13 a string, 14 a long one (the locale's text).
 STRING_TYPES = (13, 14)
 
@@ -143,9 +147,30 @@ def huffman_decode(block, offset, tree, long=False):
     return bytes(out)
 
 
+MAX_CODE_BITS = 11  # the game's own tables never use longer codes (its decoder may not take them)
+
+
+def code_lengths(freq, limit):
+    """Optimal code lengths no longer than limit bits (package-merge)."""
+    symbols = sorted(freq, key=lambda x: (freq[x], x))
+    if len(symbols) == 1:
+        return {symbols[0]: 1}
+    leaves = [(freq[x], (x,)) for x in symbols]
+    current = list(leaves)
+    for _ in range(limit - 1):
+        packages = [(current[i][0] + current[i + 1][0], current[i][1] + current[i + 1][1])
+                    for i in range(0, len(current) - 1, 2)]
+        current = sorted(leaves + packages, key=lambda t: t[0])
+    lengths = {x: 0 for x in symbols}
+    for _, members in current[:2 * len(symbols) - 2]:
+        for x in members:
+            lengths[x] += 1
+    return lengths
+
+
 def huffman_build(strings):
-    """A tree for these strings' bytes, as the game's block begins with it, and each byte's code (bits)."""
-    import heapq
+    """A tree for these strings' bytes, as the game's block begins with it, and each byte's code (bits): a
+    canonical code of at most MAX_CODE_BITS bits a byte, inner nodes numbered breadth-first from the root (0)."""
     freq = {}
     for s in strings:
         for x in s:
@@ -153,49 +178,43 @@ def huffman_build(strings):
     if len(freq) < 2:  # a tree needs two leaves
         for x in (32, 101):
             freq.setdefault(x, 1)
-    heap = [(f, i, ('l', x)) for i, (x, f) in enumerate(sorted(freq.items()))]
-    heapq.heapify(heap)
-    counter = len(heap)
-    while len(heap) > 1:
-        f1, _, a = heapq.heappop(heap)
-        f2, _, b = heapq.heappop(heap)
-        heapq.heappush(heap, (f1 + f2, counter, ('i', a, b)))
-        counter += 1
-    root = heap[0][2]
-    # Inner nodes numbered breadth-first from the root (0); at most 255 (one byte each).
+    lengths = code_lengths(freq, MAX_CODE_BITS)
+    codes, code, prev = {}, 0, 0
+    for x in sorted(lengths, key=lambda x: (lengths[x], x)):
+        code <<= lengths[x] - prev
+        prev = lengths[x]
+        codes[x] = format(code, f'0{prev}b')
+        code += 1
+    root = {}
+    for x, bits in codes.items():
+        node = root
+        for b in bits[:-1]:
+            node = node.setdefault(b, {})
+        node[bits[-1]] = x
     order, queue = [], [root]
     while queue:
         node = queue.pop(0)
-        if node[0] == 'i':
-            order.append(node)
-            queue += [node[1], node[2]]
-    index = {id(n): i for i, n in enumerate(order)}
+        order.append(node)
+        queue += [node[b] for b in '01' if isinstance(node[b], dict)]
     if len(order) > 255:
         raise ValueError('too many different characters for one Huffman tree')
+    index = {id(n): i for i, n in enumerate(order)}
     tree = bytearray()
-    codes = {}
     for node in order:
-        for child in (node[1], node[2]):
-            tree += bytes([0, child[1]]) if child[0] == 'l' else bytes([index[id(child)], 0])
-
-    def walk(node, code):
-        if node[0] == 'l':
-            codes[node[1]] = code
-        else:
-            walk(node[1], code + '0')
-            walk(node[2], code + '1')
-    walk(root, '')
+        for b in '01':
+            child = node[b]
+            tree += bytes([index[id(child)], 0]) if isinstance(child, dict) else bytes([0, child])
     return bytes(tree), codes
-
-
-def length_prefix(raw, long):
-    return len(raw).to_bytes(2 if long else 1, 'big')
 
 
 def huffman_encode(raw, codes, long=False):
     bits = ''.join(codes[x] for x in raw)
     bits += '0' * (-len(bits) % 8)
     return length_prefix(raw, long) + bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
+
+
+def length_prefix(raw, long):
+    return len(raw).to_bytes(2 if long else 1, 'big')
 
 
 def get_bits(rec, offset, bits):
@@ -435,6 +454,8 @@ def main(argv):
                         v = r[col]
                         values[s] = v if ftype == 0 or ftype in STRING_TYPES else (float(v) if ftype == 4 else int(v) - low)
                     rows.append(values)
+            if len(rows) > MAX_RECORDS:
+                raise SystemExit(f'{tname}: {len(rows)} records, more than a table holds ({MAX_RECORDS})')
             blobs.append(build_table(t, rows))
             print(f'{tname}: {len(rows)} records (was {t.records})')
         write_db(out, head16, tables, blobs)

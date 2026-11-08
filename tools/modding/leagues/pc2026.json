@@ -1,0 +1,60 @@
+{
+  "comment": "A squads file of the PC game (FIFA 19 PC community update, 25 April 2026: Sostavy_na_25042026/Squads20260425161423) into this game's database (pcsquads.py). replaced: the clubs the update lent to other clubs' players (Russia's 16 in Ireland's and Norway's, Como in Brescia, Twente in Tigre...): they keep the game's squads, the guests go to free agents. legends: the update's MLS, where it put the 2010s squads of 23 great clubs, as a league of its own. Its country is Rest of World (211): Career sets up its scouts by the league's country, and src/mod_support.cpp gives a country in none of the game's scouting regions a default one.",
+  "today": "2026-04-25",
+  "age_shift_years": 8,
+  "free_agents_team_id": 111592,
+  "replaced": [
+    "Brescia", "Crotone", "Perugia", "Tigre", "Desportivo Aves", "Austria Wien", "Unión Española", "FC St. Gallen",
+    "FC Lugano", "BK Häcken", "Brøndby IF", "FC Nordsjælland", "Aarhus GF", "Jagiellonia Białystok", "Lech Poznań",
+    "CSKA Moskva", "Lokomotiv Moskva", "Spartak Moskva", "HJK Helsinki", "Kaizer Chiefs", "Orlando Pirates",
+    "Bohemians", "Limerick FC", "Bray Wanderers", "Cork City", "Dundalk FC", "Waterford FC", "Derry City",
+    "St. Patrick's Athletic", "Shamrock Rovers", "Sligo Rovers",
+    "FK Haugesund", "IK Start", "Sandefjord Fotball", "Sarpsborg 08 FF", "Ranheim Fotball", "Kristiansund BK"
+  ],
+  "legends": {
+    "source_league": 39,
+    "league_id": 69,
+    "nation_id": 211,
+    "first_team_id": 121000,
+    "first_player_id": 300000,
+    "template_league_id": 68,
+    "database_name": "Legends League (1)",
+    "league_strings": {
+      "LeagueName_{id}": "Legends League",
+      "LeagueName_Abbr15_{id}": "Legends League",
+      "Labbr_{id}": "LEGENDS",
+      "Labbr_{id}_upper": "LEGENDS",
+      "TrophyName_{id}": "Legends League",
+      "TrophyName_Abbr15_{id}": "Legends"
+    },
+    "league_logos": {"text": ["LEGENDS", "2010s"]},
+    "compdata": {"template_nation": 1430, "template_league": 1431, "nation_code": "LGND", "schedule_from": "C14"},
+    "referees": [["Pierluigi", "Collina"], ["Howard", "Webb"], ["Markus", "Merk"], ["Anders", "Frisk"],
+                 ["Pedro", "Proença"], ["Kim Milton", "Nielsen"], ["Urs", "Meier"], ["Graham", "Poll"]],
+    "teams": {
+      "693": {"club": "Arsenal", "name": "Arsenal Legends", "short": "Arsenal", "abbr3": "ARS"},
+      "691": {"club": "Chelsea", "name": "Chelsea Legends", "short": "Chelsea", "abbr3": "CHE"},
+      "112828": {"club": "Manchester City", "name": "Man City Legends", "short": "Man City", "abbr3": "MCI"},
+      "111651": {"club": "Manchester United", "name": "Man Utd Legends", "short": "Man Utd", "abbr3": "MUN"},
+      "111065": {"club": "Liverpool", "name": "Liverpool Legends", "short": "Liverpool", "abbr3": "LIV"},
+      "689": {"club": "Tottenham Hotspur", "name": "Spurs Legends", "short": "Spurs", "abbr3": "TOT"},
+      "697": {"club": "Real Madrid", "name": "Real Madrid Legends", "short": "Real Madrid", "abbr3": "RMA"},
+      "694": {"club": "FC Barcelona", "name": "Barcelona Legends", "short": "Barcelona", "abbr3": "BAR"},
+      "695": {"club": "Atlético de Madrid", "name": "Atlético Legends", "short": "Atlético", "abbr3": "ATM"},
+      "101112": {"club": "Sevilla FC", "name": "Sevilla Legends", "short": "Sevilla", "abbr3": "SEV"},
+      "688": {"club": "Valencia CF", "name": "Valencia Legends", "short": "Valencia", "abbr3": "VAL"},
+      "112996": {"club": "Juventus", "name": "Juventus Legends", "short": "Juventus", "abbr3": "JUV"},
+      "111139": {"club": "Inter", "name": "Inter Legends", "short": "Inter", "abbr3": "INT"},
+      "112885": {"club": "Milan", "name": "Milan Legends", "short": "Milan", "abbr3": "MIL"},
+      "696": {"club": "Napoli", "name": "Napoli Legends", "short": "Napoli", "abbr3": "NAP"},
+      "698": {"club": "Roma", "name": "Roma Legends", "short": "Roma", "abbr3": "ROM"},
+      "112134": {"club": "Lazio", "name": "Lazio Legends", "short": "Lazio", "abbr3": "LAZ"},
+      "111138": {"club": "Bayern München", "name": "Bayern Legends", "short": "Bayern", "abbr3": "FCB"},
+      "687": {"club": "Borussia Dortmund", "name": "Dortmund Legends", "short": "Dortmund", "abbr3": "BVB"},
+      "111140": {"club": "Bayer 04 Leverkusen", "name": "Leverkusen Legends", "short": "Leverkusen", "abbr3": "B04"},
+      "112606": {"club": "Paris Saint-Germain", "name": "PSG Legends", "short": "PSG", "abbr3": "PSG"},
+      "111144": {"club": "Olympique Lyonnais", "name": "Lyon Legends", "short": "Lyon", "abbr3": "OL"},
+      "111928": {"club": "MLS All Stars", "name": "World XI Legends", "short": "World XI", "abbr3": "WXI"}
+    }
+  }
+}

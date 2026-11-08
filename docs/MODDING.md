@@ -127,9 +127,126 @@ All in `data/sceneassets` (RX3 files: models with their textures), named by id:
 Leagues, cups and their seasons are text files in
 `dlc/dlc_footballcompeng/dlc/footballcompeng/data/compdata` (data1.big): `compobj.txt` (the tree of
 competitions), `settings.txt`, `schedule.txt`, `advancement.txt`, `initteams.txt`, `standings.txt`,
-`tasks.txt`, `weather.txt`, `compids.txt`. A new league is rows in the database (`leagues`,
-`leagueteamlinks`, its teams, players and links), entries in these files, and its names in the locale
-database (MOD1).
+`tasks.txt`, `weather.txt`, `compids.txt`. `tools/modding/compdata.py` describes each file's columns.
+
+## A new league
+
+```bash
+sh tools/modding/build_league.sh rus
+```
+
+That builds the Russian Premier League as a mod in `out/mods/rus`, from `tools/modding/leagues/rus.json`.
+Put the folder (or a link to it) in the Mods folder. The steps:
+
+1. **Source.** `tools/modding/sources/espn.py` fetches the current squads, the table and every player's
+   season statistics from ESPN's public JSON API (paced, cached in `out/moddata/espn`). SoFIFA answers
+   automated clients with a CAPTCHA, which these tools don't get around. ClubElo was down.
+2. **Database.** `tools/modding/league.py` adds the league, its 16 clubs and their squads:
+   - **Players the game has**, matched by name and birth date (44 here), keep their id: face, hair, boots.
+     Their ratings move to today's by age and playing time.
+   - **New players** (444) are rated from:
+     - the club's strength (the table);
+     - their share of the club's minutes;
+     - goals and assists for attackers.
+   - **New players' attributes** come from the game's players of the same position and rating, their
+     looks from a generic-head player of their nationality, and their stronger foot from the shots they
+     took.
+   - **Birth dates** move back 8 years, as the game's calendar starts in 2018.
+   - **Clubs** get numbers, a line-up, captain and kickers, prestige and budget.
+   - **Clubs the game already has** (CSKA, Lokomotiv, Spartak in Rest of World) keep their ids, kits and
+     crests. Their old players go to Free Agents.
+   - **Career needs** referees, board objectives and the `competition` row (the league's ball). Those are
+     added too.
+3. **Assets.** `tools/modding/teamassets.py` makes:
+   - the menus' crests from the clubs' logos, in all sizes;
+   - the league's logo (`imgassets/league*`, `leaguelogos_*`);
+   - kits, for now copied from a club with the nearest home colours.
+4. **Competition.** `tools/modding/compdata.py` adds the country, league, stage and group:
+   - cloned from Turkey's, as a 30-round double round robin with no European places;
+   - placed after the last UEFA country, so every id after it moves up in every file. When the block was
+     appended after the last id instead, Career's fixtures screen listed another competition's matches.
+
+What the game needs that isn't in the files:
+
+- **League tiers.** The game sorts its leagues into six hard-coded tiers (`sub_82C76400`), and most callers
+  index a table with the result unchecked. A league in no tier crashes Career, at the start and when the
+  season is simulated. `src/mod_support.cpp` gives a league the game doesn't have tier 3, Europe's other
+  first divisions (`fifa19_mod_league_tier`). The game's own untiered leagues (Rest of World,
+  International, Free Agents...) stay as they are.
+- **Scouting regions.** A new Career sets up its scouts by the region of its league's country: the first of nine
+  hard-coded lists of nations that has it (`sub_82D826F8`; England, Scandinavia and Russia are region 2), used
+  unchecked (`sub_82DAD6E0`). A league in a country of none (Rest of World, Wales) never finished loading a
+  Career. `src/mod_support.cpp` gives such a country region 2 (`fifa19_mod_scout_region`).
+- **Ids in use.** Team ids from 120000 (130000 and 130001 already have crests). Player ids from 260000 (no
+  face files there).
+
+## How much the game takes
+
+The meta's `maxinsert` is not a limit: the game boots and plays with 8,000 more players and links than its
+tables have (`maxinsert` 3,282). What does limit it:
+
+| What | Limit | Why |
+|---|---|---|
+| records in a table | 65,535 | the table's counts are 16-bit |
+| player ids | 500,000 | 19 bits, the meta's range |
+| team ids | 200,000 | 18 bits |
+| league ids | 4,000 | 12 bits (so are the league-team links' keys: 4,095 links) |
+| new names | 8,192 | `dcplayernames`, ids 34000-42191 (13 bits; the meta says 40000), 37 bytes each |
+| names beyond those | any | `editedplayernames`: a player's names as text, as Edit Player keeps them (44 bytes each) |
+| a club's squad | 33 kept | the game's own biggest; the PC game takes 51, but nothing needs more |
+| free agents | 500 kept | the game has 250; an update's thousands are deleted, the best kept (and those also in a national team) |
+
+**The names table** (`playernames`, Huffman-coded) stays as the game has it. Rewritten, it crashed the game at boot
+(a null database handle in `sub_836C17A8`) for some contents and not others: the same table with three names
+three letters longer booted. New names go to `dcplayernames` (as the PC game's updates add theirs), and past its
+8,192 to `editedplayernames`. A name keeps to the characters the game's names use (`ț` as `t`, `ё` as `e`):
+another crashed it too.
+
+## The PC squads file and the Legends
+
+```bash
+sh tools/modding/build_update.sh ~/Downloads/Sostavy_na_25042026/Squads20260425161423
+```
+
+A community squads update for the PC game (a squads save, `Squads<date>`) has today's ratings and squads of a
+year the game never had. `tools/modding/pcsquads.py` reads it into this game's database (`leagues/pc2026.json`).
+
+- **The file.** The PC game's database, little-endian, its tables with their spare records (players: 26,000, of
+  which 18,439 used), without the names table: names are ids into the PC game's own (put to text through the
+  players both games have), plus the file's new ones (`dcplayernames`) and edited players' (`editedplayernames`).
+  A few young players' names are only in the PC game's table: ESPN's player born that day of that nation names
+  them, else the game's own names for the nation (as it names its youth players).
+- **Who is who.** The update reuses ids: 4,154 of the game's ids are someone else now (the game's Lafferty is the
+  update's Woltemade). The same id and birth date is the same player (his face kept); another birth date is
+  someone new with a generic head. Updates make young players older (a 2003 birthday as 2002): later steps take
+  ESPN's date.
+- **Ratings and squads.** Ratings, attributes, positions, work rates, height and weight from the file; squads and
+  numbers for the 641 clubs and national teams it has as themselves. Line-ups are picked again for the game's
+  formations. The clubs the update lent to others (Russia's in Ireland's and Norway's, Como in Brescia...) keep
+  their own players; the guests go to free agents, where later steps find them.
+- **Legends.** The update's MLS holds the 2010s squads of 23 great clubs (Arsenal in Chicago Fire, Barcelona in
+  Colorado...). They become the Legends League (league 69, Rest of World): new teams (from 121000) with the
+  clubs' kits, crests, flags, banners and grounds, and the players as the game has them, in 2018, the decade they
+  stand for. A legend still playing today (Messi, Ronaldo, Neymar: 162) stays himself at his club, his 2018 self
+  copied to a new id with his head, face and hair files. Legends referees (Collina, Webb...).
+
+## The whole update
+
+Each mod's database replaces the game's whole, so a league and the squads must be built together:
+`tools/modding/build_update.sh` makes one mod, `out/mods/update`:
+
+1. the PC squads file, when given (above);
+2. today's squads from ESPN (`squads.py`, `leagues/world.json`), with promotion and relegation: each division
+   gets the clubs ESPN has in it (82 moves for 2026/27: Sunderland, Leeds, Coventry and Hull up, Wolves, Burnley,
+   West Ham down...), its size kept, the country's other clubs filling the places of clubs the game hasn't
+   (Wrexham's Championship place goes to Scunthorpe);
+3. the leagues the game hasn't (`league.py`: Russia's);
+4. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`);
+5. the free agents kept to the best 500 (`freeagents.py`).
+
+A player the file rated keeps its ratings in the later steps; they only move him to his club. Matching ESPN's
+players to the game's: name and birth date, the birth year within three, a near spelling (the update's
+Branthwate), and within a club its own players by birthday.
 
 ## Tools
 
@@ -137,6 +254,10 @@ database (MOD1).
 |---|---|
 | `tools/modding/modgame.py` | `build`: the modded game; `list`, `extract`: archives |
 | `tools/modding/db.sh` | the database to CSV, and CSV to a mod; the game's text to CSV (`strings`) |
+| `tools/modding/build_update.sh` | the whole update as one mod: the PC squads file, ESPN's squads, new leagues |
+| `tools/modding/pcsquads.py` | a PC squads file's ratings, squads and Legends League |
+| `tools/modding/squads.py`, `build_squads.sh` | today's squads and divisions from ESPN (alone: `out/mods/world`) |
+| `tools/modding/freeagents.py` | the free agents kept to the best 500 |
 | `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check`; the locale's string hash and update files |
 | `tools/modding/unchunk.c` | chunkzip/chunklzx entries to plain bytes |
 | `scripts/run_app.sh --game DIR` | a test run from another game folder, such as a modded game built by hand |
