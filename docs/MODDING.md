@@ -36,8 +36,8 @@ So a mod's file is used as follows:
 the mods' files, plus the rewritten indexes. It takes no space to speak of. The launcher builds it in
 `Application Support/FIFA 19/Modded Game` at each start and runs the game from it (`--game_data_root`).
 
-Not covered: `data/loc/locale.big` has no index (the game reads its table of names), so its files can't be
-replaced this way. Use `data/loc/eng_us_upd.db`, the update database the game looks for (MOD4).
+`data/loc/locale.big`, the game's text, has no index (the game reads its table of names), so its files can't
+be replaced this way; the text has its own way in (Strings, below).
 
 ## The database
 
@@ -71,6 +71,41 @@ Tables worth knowing:
 | `teamkits` | kit colours and styles per team |
 | `teamstadiumlinks`, `stadiums` | grounds |
 
+## Strings
+
+The game's text (team, league, player and stadium names, menus, news) is `data/loc/<language>.db` in
+`locale.big`: one table, `LanguageStrings`, of string ids (`TeamName_11`, `TeamName_Abbr3_11`,
+`LeagueName_13`...), their text and the id's hash, which the game looks a string up by. Beside it the game
+opens `data/loc/<language>_upd.db` with `<language>_upd-meta.xml` when they are there, and takes a string from
+it first. So an update needs only the strings it changes or adds.
+
+A mod gives its strings as `strings/<language>.csv` (`eng_us`, `rus_ru`, `pol_pl`, `ara_sa`):
+
+```
+stringid,text
+TeamName_11,Macintosh United
+TeamName_Abbr3_11,MAC
+TeamName_Abbr15_11,Macintosh Utd
+```
+
+The mods' strings go into one update per language when the game starts (later mods win). To find a string's
+id:
+
+```bash
+sh tools/modding/db.sh strings
+```
+
+That writes `out/mod/strings-eng_us/LanguageStrings.csv`. Checked: the scoreboard reads MAC 0-0 MTL and the
+line-up card MACINTOSH UTD.
+
+What it took:
+
+- **Name.** The update's meta must name its database `<language>_upd` (`sub_8382A8A0` opens it under that name).
+  With the base's name the game crashes.
+- **Hash.** The id's hash is CRC-32's table over the id's bytes with bit 5 cleared (upper case), from 0
+  and without the final inversion (`sub_826191D8`). `fifadb.string_hash` computes it, so new ids work too.
+  It matches 43,922 of the 43,935 English strings.
+
 ## Assets
 
 All in `data/sceneassets` (RX3 files: models with their textures), named by id:
@@ -101,8 +136,8 @@ database (MOD1).
 | Tool | What |
 |---|---|
 | `tools/modding/modgame.py` | `build`: the modded game; `list`, `extract`: archives |
-| `tools/modding/db.sh` | the database to CSV, and CSV to a mod |
-| `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check` |
+| `tools/modding/db.sh` | the database to CSV, and CSV to a mod; the game's text to CSV (`strings`) |
+| `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check`; the locale's string hash and update files |
 | `tools/modding/unchunk.c` | chunkzip/chunklzx entries to plain bytes |
 | `scripts/run_app.sh --game DIR` | a test run from another game folder, such as a modded game built by hand |
 

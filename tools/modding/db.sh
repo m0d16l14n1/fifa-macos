@@ -4,6 +4,9 @@
 #   sh tools/modding/db.sh export [DIR]          every table to DIR/<table>.csv (default out/mod/csv)
 #   sh tools/modding/db.sh mod CSVDIR MODDIR     a mod with the tables whose CSV is in CSVDIR changed:
 #                                                MODDIR/data/db/fifa_ng_db.db (the other tables as they are)
+#   sh tools/modding/db.sh strings [LANG] [DIR]  the game's text (eng_us, rus_ru, pol_pl, ara_sa) to
+#                                                DIR/LanguageStrings.csv (default out/mod/strings-LANG): find a
+#                                                string's id there, then change it in a mod's strings/LANG.csv
 #
 # Copy the CSV files you change to a folder of their own, edit them (a spreadsheet does), then make the mod and
 # put MODDIR in ~/Library/Application Support/FIFA 19/Mods (or run it: sh scripts/run_app.sh --game, after
@@ -29,10 +32,21 @@ case "$1" in
     unpack
     python3 "$here/fifadb.py" export "$db" "$meta" "${2:-$root/out/mod/csv}" ;;
   mod)
-    [ -n "$2" ] && [ -n "$3" ] || { sed -n 2,11p "$0" >&2; exit 2; }
+    [ -n "$2" ] && [ -n "$3" ] || { sed -n 2,14p "$0" >&2; exit 2; }
     unpack
     mkdir -p "$3/data/db"
     python3 "$here/fifadb.py" import "$db" "$meta" "$2" "$3/data/db/fifa_ng_db.db" ;;
+  strings)
+    lang="${2:-eng_us}" loc="$root/out/mod/loc"
+    [ -x "$root/out/tools/unchunk" ] || sh "$here/build.sh"
+    mkdir -p "$loc"
+    for name in "$lang.db" "$lang-meta.xml"; do
+      [ -f "$loc/$name" ] && continue
+      python3 "$here/modgame.py" extract "$game/data/loc/locale.big" "data/loc/$name" "$loc/$name.stored"
+      "$root/out/tools/unchunk" "$loc/$name.stored" "$loc/$name"
+      rm -f "$loc/$name.stored"
+    done
+    python3 "$here/fifadb.py" export "$loc/$lang.db" "$loc/$lang-meta.xml" "${3:-$root/out/mod/strings-$lang}" ;;
   *)
-    sed -n 2,11p "$0" >&2; exit 2 ;;
+    sed -n 2,14p "$0" >&2; exit 2 ;;
 esac

@@ -6,7 +6,10 @@ has it, opens it loose from the disc (d:\\data\\...). So a mod is a folder of lo
 (data/db/fifa_ng_db.db, data/sceneassets/kit/...):
 - a file no archive has is new, and the game finds it loose;
 - a file an archive has replaces it: the archive's .bh index loses that entry (found by its offset in the archive's
-  own table of names, so the hash function needn't be known), and the game then finds the loose file.
+  own table of names, so the hash function needn't be known), and the game then finds the loose file;
+- strings/<language>.csv (columns stringid,text; eng_us, rus_ru, pol_pl, ara_sa) changes or adds the game's text
+  (team, league and player names, menus): the mods' strings go into data/loc/<language>_upd.db, which the game
+  reads beside its own and takes first.
 
 The modded game is a folder of links: to the game's files and folders, to the mods' files, plus the rewritten .bh
 indexes. It takes no space to speak of and the game folder stays as it was.
@@ -17,9 +20,13 @@ indexes. It takes no space to speak of and the game folder stays as it was.
 
 Run it: sh scripts/run_app.sh --game out/modgame ...
 """
+import csv
 import os
 import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fifadb  # noqa: E402
 
 
 def read_big(path):
@@ -69,8 +76,29 @@ def mod_files(mods):
                 if name.startswith('.'):
                     continue
                 host = os.path.join(root, name)
-                files[norm(os.path.relpath(host, mod))] = os.path.abspath(host)
+                path = norm(os.path.relpath(host, mod))
+                if not path.startswith('strings/'):
+                    files[path] = os.path.abspath(host)
     return files
+
+
+def mod_strings(mods):
+    """{language: {string id: text}} from the mods' strings/<language>.csv, later mods winning."""
+    out = {}
+    for mod in mods:
+        folder = os.path.join(mod, 'strings')
+        if not os.path.isdir(folder):
+            continue
+        for name in sorted(os.listdir(folder)):
+            if not name.lower().endswith('.csv'):
+                continue
+            strings = out.setdefault(name[:-4].lower(), {})
+            with open(os.path.join(folder, name), newline='', encoding='utf-8-sig') as f:
+                for row in csv.DictReader(f):
+                    text = row.get('text', row.get('sourcetext'))
+                    if row.get('stringid') and text is not None:
+                        strings[row['stringid']] = text
+    return out
 
 
 def link_tree(game, out, overrides, rel=''):
@@ -120,6 +148,13 @@ def build(game, out, mods):
     overrides = dict(files)
     generated = os.path.join(out, '.modgame')
     os.makedirs(generated, exist_ok=True)
+    for language, strings in sorted(mod_strings(mods).items()):
+        name = f'{language}_upd'
+        fifadb.language_db(os.path.join(generated, name + '.db'), strings)
+        fifadb.language_meta(os.path.join(generated, name + '-meta.xml'), name)
+        overrides[f'data/loc/{name}.db'] = os.path.join(generated, name + '.db')
+        overrides[f'data/loc/{name}-meta.xml'] = os.path.join(generated, name + '-meta.xml')
+        print(f'data/loc/{name}.db: {len(strings)} strings')
     replaced = 0
     for root, _, names in os.walk(game):
         for name in sorted(names):
