@@ -151,7 +151,8 @@ Put the folder (or a link to it) in the Mods folder. The steps:
    - **New players' attributes** come from the game's players of the same position and rating, their
      looks from a generic-head player of their nationality, and their stronger foot from the shots they
      took.
-   - **Birth dates** move back 8 years, as the game's calendar starts in 2018.
+   - **Birth dates** move back 8 years, as the game's calendar starts in 2018 (the update's last step moves the
+     calendar and every date forward again: below).
    - **Clubs** get numbers, a line-up, captain and kickers, prestige and budget.
    - **Clubs the game already has** (CSKA, Lokomotiv, Spartak in Rest of World) keep their ids, kits and
      crests. Their old players go to Free Agents.
@@ -177,7 +178,7 @@ What the game needs that isn't in the files:
   hard-coded lists of nations that has it (`sub_82D826F8`; England, Scandinavia and Russia are region 2), used
   unchecked (`sub_82DAD6E0`). A league in a country of none (Rest of World, Wales) never finished loading a
   Career. `src/mod_support.cpp` gives such a country region 2 (`fifa19_mod_scout_region`).
-- **Ids in use.** Team ids from 120000 (130000 and 130001 already have crests). Player ids from 260000 (no
+- **Ids in use.** Team ids from 120000: Russia's 120000 on, the Legends' 121000 on, new clubs 125000 on (130000 and 130001 already have crests). Player ids from 260000 (no
   face files there).
 
 ## How much the game takes
@@ -230,6 +231,45 @@ year the game never had. `tools/modding/pcsquads.py` reads it into this game's d
   stand for. A legend still playing today (Messi, Ronaldo, Neymar: 162) stays himself at his club, his 2018 self
   copied to a new id with his head, face and hair files. Legends referees (Collina, Webb...).
 
+## The FC 27 ratings
+
+`tools/modding/fc27.py` takes an FC 27 player dump (EA's public ratings, 12 September 2026: players.csv, one row a
+player, put in `tools/modding/sources/stats-dump`, git-ignored) as the last word on ratings:
+
+- **Who.** EA keeps a player's id from game to game: the same id and birthday (the year within one) is the same
+  player (4,051 of the game's own); else name and birthday, as the other steps match.
+- **What.** The overall, the 33 attributes the game has (FC's defensive awareness as marking; composure it
+  hasn't), positions (main and up to three more), foot, skill moves, weak foot. The potential stays when higher
+  (young players), else follows the age. The dump has no heights.
+- **Squads ESPN hasn't.** `leagues/fc27.json`'s leagues (3. Liga, Ekstraklasa, Ireland, Korea) get the dump's
+  squads: a club is the game's team of that name or, in that league, the one most of its players are in.
+  Clubs the game hasn't are made (below), with the colours `fc27.json` gives them and a drawn crest.
+
+## New clubs
+
+A league's size is fixed by its competition, so a club the game hasn't (Wrexham, Elversberg, Como) comes in only as
+one of the game's leaves. `tools/modding/clubs.py` makes it in the place of a club its division's source doesn't
+list (the weakest such): that club's row is the template (level, prestige, budget, tactics), and it goes to Rest
+of World, as the game keeps clubs it has no league for (playable, out of Career's leagues). The new club's kits are
+a club's of the nearest colours, its crest its logo (ESPN's), or its initials on a shield in its colours; ids from
+125000. `squads.py` makes ESPN's (121 for 2026/27: Wrexham for Scunthorpe in the Championship); `fc27.py` the
+dump's. A club ESPN names differently from the game is given by id in `world.json`'s `team_ids` (LAFC,
+Basaksehir), else it would be made twice.
+
+## The calendar
+
+The game's Career starts on 1 July 2018. `tools/modding/calendar_shift.py` moves it to 2026:
+
+- **Career's first day** is `CALSTART_YEAR` in `footballcompeng/data/cmsettings.ini` (2018), not the competitions:
+  moving compdata's years alone left Career in July 2018.
+- **The competitions' years** (`schedule_year_start`) move 8 years, so the tournaments every four years keep
+  theirs (2030's World Cup as 2022's). The match days stay as written for 2018: `schedule_year_real` tells the
+  game which year they are for, and it moves them to the same weekday.
+- **The tournaments' stadiums** (`internationals.txt`) run to 2030 and 2032 in the game; they repeat after the
+  years their lists cover.
+- **Every date in the database** moves 8 years: the update's players, whose births the steps keep 8 years back
+  (as the game's 2018 needed), get their real ones; the Legends stay the age they were in their decade.
+
 ## The whole update
 
 Each mod's database replaces the game's whole, so a league and the squads must be built together:
@@ -238,15 +278,17 @@ Each mod's database replaces the game's whole, so a league and the squads must b
 1. the PC squads file, when given (above);
 2. today's squads from ESPN (`squads.py`, `leagues/world.json`), with promotion and relegation: each division
    gets the clubs ESPN has in it (82 moves for 2026/27: Sunderland, Leeds, Coventry and Hull up, Wolves, Burnley,
-   West Ham down...), its size kept, the country's other clubs filling the places of clubs the game hasn't
-   (Wrexham's Championship place goes to Scunthorpe);
+   West Ham down...), its size kept; the clubs the game hasn't are made (above);
 3. the leagues the game hasn't (`league.py`: Russia's);
-4. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`);
-5. the free agents kept to the best 500 (`freeagents.py`).
+4. the FC 27 ratings and the squads ESPN hasn't (`fc27.py`), when the dump is there;
+5. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`);
+6. the free agents kept to the best 500 (`freeagents.py`);
+7. the calendar, 8 years on (`calendar_shift.py`).
 
-A player the file rated keeps its ratings in the later steps; they only move him to his club. Matching ESPN's
+A player the file rated keeps its ratings in the ESPN steps; they only move him to his club. Matching ESPN's
 players to the game's: name and birth date, the birth year within three, a near spelling (the update's
-Branthwate), and within a club its own players by birthday.
+Branthwate), and within a club its own players by birthday. The Legends' clubs have no transfer budget, so
+Career's AI doesn't buy for them.
 
 ## Tools
 
@@ -257,6 +299,9 @@ Branthwate), and within a club its own players by birthday.
 | `tools/modding/build_update.sh` | the whole update as one mod: the PC squads file, ESPN's squads, new leagues |
 | `tools/modding/pcsquads.py` | a PC squads file's ratings, squads and Legends League |
 | `tools/modding/squads.py`, `build_squads.sh` | today's squads and divisions from ESPN (alone: `out/mods/world`) |
+| `tools/modding/fc27.py` | an FC 27 dump's ratings, and its squads for the leagues ESPN hasn't |
+| `tools/modding/clubs.py` | new clubs in the places of those that leave (for `squads.py` and `fc27.py`) |
+| `tools/modding/calendar_shift.py` | the calendar 8 years on: Career from July 2026 |
 | `tools/modding/freeagents.py` | the free agents kept to the best 500 |
 | `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check`; the locale's string hash and update files |
 | `tools/modding/unchunk.c` | chunkzip/chunklzx entries to plain bytes |

@@ -1,17 +1,25 @@
 #!/bin/sh
 # Builds the whole update as one mod (one database, as each mod's database replaces the game's whole):
 #   1. a PC squads file's ratings and squads, and its Legends league (pcsquads.py, leagues/pc2026.json), when given;
-#   2. today's squads from ESPN for the leagues in leagues/world.json (squads.py);
+#   2. today's squads from ESPN for the leagues in leagues/world.json, with the clubs the game hasn't (Wrexham) made
+#      in the places of those that left (squads.py, clubs.py);
 #   3. the leagues the game hasn't, from ESPN (league.py: leagues/rus.json);
-#   4. their kits, crests and logos, the Legends' copied heads (teamassets.py), their competitions (compdata.py);
-#   5. the free agents kept to the best 500, as the game's own pool (freeagents.py).
+#   4. an FC 27 dump's ratings for every player it has, and its squads for the leagues ESPN hasn't (fc27.py,
+#      leagues/fc27.json), when given;
+#   5. their kits, crests and logos, the Legends' copied heads (teamassets.py), their competitions (compdata.py);
+#   6. the free agents kept to the best 500, as the game's own pool (freeagents.py);
+#   7. the calendar 8 years on: Career starts in July 2026 (calendar_shift.py).
 # Each step works on the tables the one before left. The mod lands in out/mods/update; put it (or a link to it) in
 # ~/Library/Application Support/FIFA 19/Mods. ESPN's files are cached in out/moddata/espn (fetched when missing).
 #
-#   sh tools/modding/build_update.sh [SQUADFILE]     SQUADFILE: the PC game's Squads<date> (FBCHUNKS)
+#   sh tools/modding/build_update.sh [SQUADFILE [FC27.csv]]
+#     SQUADFILE: the PC game's Squads<date> (FBCHUNKS), or - for none; FC27.csv: the FC 27 dump's players.csv
+#     (by default tools/modding/sources/stats-dump/data/players.csv, git-ignored, when there)
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"; root="$(cd "$here/../.." && pwd)"
-squadfile="$1"
+squadfile="$1" fc27="${2:-$here/sources/stats-dump/data/players.csv}"
+[ -f "$fc27" ] || fc27=""
+[ "$squadfile" = - ] && squadfile=""
 game="${FIFA19_GAME_DIR:-$root/game}" espn="$root/out/moddata/espn"
 work="$root/out/mod/update" mod="$root/out/mods/update" base="$root/out/mod/csv"
 leagues="rus"
@@ -35,7 +43,9 @@ PY
   python3 "$here/sources/espn.py" "$code" "$espn" none
 done
 python3 "$here/squads.py" "$here/leagues/world.json" "$work/csv" "$espn" "$work/csv" $pc
-mv "$work/csv/squads.json" "$work/"
+mv "$work/csv/squads.json" "$work/csv/squads-clubs.json" "$work/"
+mv "$work/csv/squads-strings.csv" "$work/strings-squads.csv"
+python3 "$here/teamassets.py" "$work/squads-clubs.json" "$game" "$mod" | tail -1
 
 for name in $leagues; do
   cfg="$here/leagues/$name.json"
@@ -46,7 +56,15 @@ for name in $leagues; do
   python3 "$here/teamassets.py" "$work/league-$name.json" "$game" "$mod"
 done
 [ -f "$work/legends.json" ] && python3 "$here/teamassets.py" "$work/legends.json" "$game" "$mod"
+if [ -n "$fc27" ]; then
+  python3 "$here/fc27.py" "$here/leagues/fc27.json" "$work/csv" "$fc27" "$work/csv" "${pc:--}" \
+    "$work/squads.json" "$work"/league-*.json
+  mv "$work/csv/fc27.json" "$work/csv/fc27-clubs.json" "$work/"
+  mv "$work/csv/fc27-strings.csv" "$work/strings-fc27.csv"
+  python3 "$here/teamassets.py" "$work/fc27-clubs.json" "$game" "$mod" | tail -1
+fi
 python3 "$here/freeagents.py" "$work/csv" 500
+python3 "$here/calendar_shift.py" 8 "$work/csv"
 
 # The database: the tables the steps changed.
 for f in "$work/csv"/*.csv; do
@@ -75,6 +93,7 @@ if [ -f "$work/legends.json" ]; then
 fi
 mkdir -p "$mod/$dir"
 cp "$src"/*.txt "$mod/$dir/"
+python3 "$here/calendar_shift.py" 8 "$work/none" "$mod/$dir" "$game" | sed 's/ ()//'
 
 # The names: every step's strings in one file.
 { echo "stringid,text"; for f in "$work"/strings-*.csv; do tail -n +2 "$f"; done; } > "$mod/strings/eng_us.csv"

@@ -17,7 +17,8 @@ How players are made:
   assists for attackers; attributes from the game's players of his position and rating; looks from a player of
   his nationality with a generic head; boots from the game's own mix.
 - Ages: the game's calendar starts in 2018, so birth dates are moved back by CONFIG's age_shift_years (8 for
-  2026) to keep each player's real age.
+  2026) to keep each player's real age (build_update.sh's last step, calendar_shift.py, moves the calendar and
+  every date forward again).
 """
 import csv
 import datetime
@@ -696,6 +697,7 @@ class Builder:
         leagues = set(map(str, self.cfg['kit_donor_leagues']))
         allowed = {x['teamid'] for x in self.t['leagueteamlinks'] if x['leagueid'] in leagues}
         allowed -= {str(m) for m in self.used_donors}
+        allowed = {t for t in allowed if int(t) < 120000}  # the game's own: a club made here has no kit files
         best = None
         for k in self.t['teamkits']:
             if k['teamkittypetechid'] != '0' or k['teamtechid'] not in allowed:

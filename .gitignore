@@ -43,3 +43,4 @@ __pycache__/
 *-meta.xml
 # The PC game's squads saves (an update's file: Squads<date>), wherever one is put
 Squads[0-9]*
+/tools/modding/sources/stats-dump

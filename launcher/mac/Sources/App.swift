@@ -273,7 +273,8 @@ struct ModsPage: View {
                  + "files stay as they are. Names and other text go in strings/eng_us.csv (stringid,text). Mods go on in "
                  + "name order: where two change the same file or string, the later wins.")
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // No .fixedSize(horizontal: false, vertical: true) here: on macOS 27 it left the whole window blank
+            // (sidebar too) and the launcher unusable. The text wraps without it.
             HStack {
                 Button {
                     try? FileManager.default.createDirectory(at: game.paths.mods, withIntermediateDirectories: true)
