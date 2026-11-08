@@ -8,7 +8,7 @@ import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable {
     case play = "Play", quickMatch = "Quick Match", graphics = "Graphics", controls = "Controls",
-         gameFiles = "Game Files", about = "About"
+         mods = "Mods", gameFiles = "Game Files", about = "About"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -16,6 +16,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .quickMatch: return "sportscourt"
         case .graphics: return "display"
         case .controls: return "gamecontroller"
+        case .mods: return "puzzlepiece.extension"
         case .gameFiles: return "externaldrive"
         case .about: return "info.circle"
         }
@@ -52,6 +53,7 @@ struct LauncherApp: App {
                     case .quickMatch: QuickMatchPage()
                     case .graphics: SettingsPage(title: "Graphics", settings: Setting.graphics)
                     case .controls: SettingsPage(title: "Controls", settings: Setting.controls)
+                    case .mods: ModsPage()
                     case .gameFiles: GameFilesPage()
                     case .about: AboutPage()
                     }
@@ -256,5 +258,46 @@ struct AboutPage: View {
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+struct ModsPage: View {
+    @EnvironmentObject var game: Game
+    @State private var folders: [String] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Mods").font(.largeTitle.bold())
+            Text("A mod is a folder of the game's files, laid out as on the disc (data/db/fifa_ng_db.db, "
+                 + "data/sceneassets/kit/...). A file the game has is replaced, a new one added; your game "
+                 + "files stay as they are. Mods go on in name order: where two change the same file, the later wins.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button {
+                    try? FileManager.default.createDirectory(at: game.paths.mods, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(game.paths.mods)
+                } label: { Label("Open the Mods Folder", systemImage: "folder") }
+                Button { folders = game.modFolders() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            }
+            GroupBox {
+                if folders.isEmpty {
+                    Text("No mods in \(game.paths.mods.path).").foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(folders, id: \.self) { name in
+                            Toggle(name, isOn: Binding(
+                                get: { !game.disabledMods.contains(name) },
+                                set: { on in
+                                    if on { game.disabledMods.remove(name) } else { game.disabledMods.insert(name) }
+                                }))
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            if !game.modStatus.isEmpty { Text("Last start: \(game.modStatus)").foregroundStyle(.secondary) }
+        }
+        .onAppear { folders = game.modFolders() }
     }
 }
