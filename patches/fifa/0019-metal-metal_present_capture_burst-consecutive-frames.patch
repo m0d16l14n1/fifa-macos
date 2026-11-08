@@ -1,0 +1,63 @@
+From 47c8678e3ce5afb2339a6c5fcabc7c7dca476017 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 00:37:40 +0700
+Subject: [PATCH 19/20] metal: metal_present_capture_burst, consecutive frames
+ captured
+
+The next N paints are each written to metal_present_capture with -000,
+-001... before .ppm, for what shows for a frame or two only.
+---
+ src/graphics/metal/metal_internal.h   |  1 +
+ src/graphics/metal/metal_presenter.mm | 15 +++++++++++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/graphics/metal/metal_internal.h b/src/graphics/metal/metal_internal.h
+index a81e9ce..a989f12 100644
+--- a/src/graphics/metal/metal_internal.h
++++ b/src/graphics/metal/metal_internal.h
+@@ -144,6 +144,7 @@ class MetalPresenter final : public ui::Presenter {
+   id<MTLDevice> device_;
+   id<MTLCommandQueue> command_queue_;
+   std::chrono::steady_clock::time_point last_capture_{};
++  uint32_t capture_burst_index_ = 0;  // the next file of a metal_present_capture_burst
+   id<MTLRenderPipelineState> paint_pipeline_ = nil;
+   id<MTLSamplerState> paint_sampler_ = nil;
+   CAMetalLayer* layer_ = nil;
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index 724318d..42e0f06 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -36,6 +36,9 @@
+ REXCVAR_DEFINE_STRING(metal_present_capture, "", "GPU/Metal",
+     "Development: write what the presenter paints (the guest output and the UI overlays) to this PPM file, at most "
+     "every 2 seconds");
++REXCVAR_DEFINE_INT32(metal_present_capture_burst, 0, "GPU/Metal",
++    "Development: the next N paints are all captured, to metal_present_capture with -000, -001... before .ppm "
++    "(consecutive frames, for flicker); counts down to 0");
+ 
+ REXCVAR_DECLARE(std::string, hdr);
+ REXCVAR_DECLARE(int32_t, frame_generation_debug);
+@@ -651,10 +654,18 @@ bool MetalPresenter::RefreshGuestOutputImpl(
+ }
+ 
+ void MetalPresenter::CapturePaint(id<MTLCommandBuffer> command_buffer, id<MTLTexture> texture, float sdr_nits) {
+-  const std::string path = REXCVAR_GET(metal_present_capture);
++  std::string path = REXCVAR_GET(metal_present_capture);
+   if (path.empty() || texture.framebufferOnly) return;
+   const auto now = std::chrono::steady_clock::now();
+-  if (now - last_capture_ < std::chrono::seconds(2)) return;
++  if (const int32_t burst = REXCVAR_GET(metal_present_capture_burst); burst > 0) {
++    const std::string stem = path.size() > 4 && path.compare(path.size() - 4, 4, ".ppm") == 0
++                                 ? path.substr(0, path.size() - 4) : path;
++    path = fmt::format("{}-{:03}.ppm", stem, capture_burst_index_++);
++    rex::cvar::SetFlagByName("metal_present_capture_burst", std::to_string(burst - 1));
++  } else {
++    capture_burst_index_ = 0;
++    if (now - last_capture_ < std::chrono::seconds(2)) return;
++  }
+   last_capture_ = now;
+   REXGPU_INFO("Metal presenter: capturing a {}x{} paint", uint32_t(texture.width), uint32_t(texture.height));
+   const NSUInteger width = texture.width, height = texture.height, stride = width * 4;
+-- 
+2.56.0
+

@@ -1,0 +1,223 @@
+From 6fc70be17e8e5502f78daa0e62f5dfe5ef8410d5 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 00:37:40 +0700
+Subject: [PATCH 20/20] gpu: gpu_vblank_display_sync, the guest vblank on the
+ display's refreshes
+
+The guest vblank timed by its own clock drifts against the display's:
+frames cross refresh boundaries, so some refreshes show two new frames
+(one never seen) or none, and at a higher rate the newest frame at each
+refresh advances the picture unevenly. With gpu_vblank_display_sync
+(macOS, off by default) a CoreVideo display link fires one vblank per
+refresh of the display, so a game that keeps up shows one new frame per
+refresh. FIFA 19 in a match on a 60 Hz display: 60.0 frames shown a
+second, none repeated or dropped, each advancing 16.66 +- 0.37 ms (at
+its own 240 Hz clock: 12-24 ms). Without a refresh for 2.5 periods (the
+display asleep) a vblank fires anyway.
+---
+ src/graphics/CMakeLists.txt         |  7 +++
+ src/graphics/display_vblank.h       | 32 ++++++++++++
+ src/graphics/display_vblank_mac.cpp | 76 +++++++++++++++++++++++++++++
+ src/graphics/graphics_system.cpp    | 31 ++++++++++++
+ 4 files changed, 146 insertions(+)
+ create mode 100644 src/graphics/display_vblank.h
+ create mode 100644 src/graphics/display_vblank_mac.cpp
+
+diff --git a/src/graphics/CMakeLists.txt b/src/graphics/CMakeLists.txt
+index 42d115f..978c5db 100644
+--- a/src/graphics/CMakeLists.txt
++++ b/src/graphics/CMakeLists.txt
+@@ -180,6 +180,13 @@ if(REXGLUE_USE_METAL)
+     )
+ endif()
+ 
++if(APPLE)
++    # The guest vblank from the display's refreshes (gpu_vblank_display_sync).
++    target_sources(rexgpu-xenos PRIVATE display_vblank_mac.cpp)
++    target_compile_definitions(rexgpu-xenos PRIVATE REX_HAS_DISPLAY_VBLANK=1)
++    target_link_libraries(rexgpu-xenos PRIVATE "-framework CoreVideo" "-framework CoreGraphics")
++endif()
++
+ if(REXGLUE_USE_VULKAN)
+     target_link_libraries(rexgpu-xenos PRIVATE
+         Vulkan::Headers
+diff --git a/src/graphics/display_vblank.h b/src/graphics/display_vblank.h
+new file mode 100644
+index 0000000..f7f0238
+--- /dev/null
++++ b/src/graphics/display_vblank.h
+@@ -0,0 +1,32 @@
++/**
++ * @file        graphics/display_vblank.h
++ * @brief       The display's refreshes as a clock for the guest vblank (macOS).
++ *
++ * @copyright   Copyright (c) 2026 FIFA 19 for macOS contributors
++ * @license     BSD 3-Clause License
++ */
++#pragma once
++
++#include <chrono>
++#include <cstdint>
++#include <memory>
++
++namespace rex::graphics {
++
++// Each refresh of the main display, from CoreVideo's display link thread. A guest vblank timed by its own clock
++// drifts against the display's: frames then cross refresh boundaries, and some refreshes show two new frames (one
++// never seen) and some none (the last one again), a judder at a steady 60 FPS. Fired from the display's refresh, a
++// frame starts right after one and is shown at the next.
++class DisplayVblank {
++ public:
++  virtual ~DisplayVblank() = default;
++  // nullptr where there is no display link (not macOS, no display).
++  static std::unique_ptr<DisplayVblank> Create();
++  // Waits for the next refresh after the last one this returned for; false after `timeout` without one (the
++  // display asleep, or no display at all).
++  virtual bool WaitForRefresh(std::chrono::microseconds timeout) = 0;
++  // The display's nominal refresh rate (Hz).
++  virtual double refresh_hz() const = 0;
++};
++
++}  // namespace rex::graphics
+diff --git a/src/graphics/display_vblank_mac.cpp b/src/graphics/display_vblank_mac.cpp
+new file mode 100644
+index 0000000..e58e059
+--- /dev/null
++++ b/src/graphics/display_vblank_mac.cpp
+@@ -0,0 +1,76 @@
++/**
++ * @file        graphics/display_vblank_mac.cpp
++ * @brief       DisplayVblank on CoreVideo's display link.
++ *
++ * @copyright   Copyright (c) 2026 FIFA 19 for macOS contributors
++ * @license     BSD 3-Clause License
++ */
++#include "display_vblank.h"
++
++#include <condition_variable>
++#include <mutex>
++
++#include <CoreVideo/CoreVideo.h>
++
++// CVDisplayLink is deprecated for CAMetalDisplayLink, which needs the presenter's layer and a run loop; this
++// thread-driven one serves the vsync worker directly and still works.
++#pragma clang diagnostic ignored "-Wdeprecated-declarations"
++
++namespace rex::graphics {
++namespace {
++
++class CoreVideoVblank final : public DisplayVblank {
++ public:
++  ~CoreVideoVblank() override {
++    if (link_) {
++      CVDisplayLinkStop(link_);
++      CVDisplayLinkRelease(link_);
++    }
++  }
++
++  bool Start() {
++    if (CVDisplayLinkCreateWithActiveCGDisplays(&link_) != kCVReturnSuccess || !link_) return false;
++    CVDisplayLinkSetOutputCallback(link_, &CoreVideoVblank::Callback, this);
++    const CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link_);
++    if (!(period.flags & kCVTimeIsIndefinite) && period.timeValue > 0)
++      refresh_hz_ = double(period.timeScale) / double(period.timeValue);
++    return CVDisplayLinkStart(link_) == kCVReturnSuccess;
++  }
++
++  bool WaitForRefresh(std::chrono::microseconds timeout) override {
++    std::unique_lock<std::mutex> lock(mutex_);
++    const bool refreshed = cond_.wait_for(lock, timeout, [this] { return refreshes_ != seen_; });
++    seen_ = refreshes_;
++    return refreshed;
++  }
++
++  double refresh_hz() const override { return refresh_hz_; }
++
++ private:
++  static CVReturn Callback(CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp*, CVOptionFlags, CVOptionFlags*,
++                           void* context) {
++    auto* self = static_cast<CoreVideoVblank*>(context);
++    {
++      std::lock_guard<std::mutex> lock(self->mutex_);
++      ++self->refreshes_;
++    }
++    self->cond_.notify_one();
++    return kCVReturnSuccess;
++  }
++
++  CVDisplayLinkRef link_ = nullptr;
++  double refresh_hz_ = 60.0;
++  std::mutex mutex_;
++  std::condition_variable cond_;
++  uint64_t refreshes_ = 0, seen_ = 0;
++};
++
++}  // namespace
++
++std::unique_ptr<DisplayVblank> DisplayVblank::Create() {
++  auto vblank = std::make_unique<CoreVideoVblank>();
++  if (!vblank->Start()) return nullptr;
++  return vblank;
++}
++
++}  // namespace rex::graphics
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 48f9f91..60676f1 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -12,6 +12,10 @@
+ #include <rex/graphics/graphics_system.h>
+ 
+ #include <algorithm>
++
++#if REX_HAS_DISPLAY_VBLANK
++#include "display_vblank.h"
++#endif
+ #include <cctype>
+ #include <cstdint>
+ #include <functional>
+@@ -35,6 +39,11 @@ REXCVAR_DEFINE_STRING(swap_post_effect, "none", "GPU", "Swap post effect: none,
+     .allowed({"none", "fxaa", "fxaa_extreme"})
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
++REXCVAR_DEFINE_BOOL(gpu_vblank_display_sync, false, "GPU",
++                    "The guest vblank on each refresh of the display (macOS) instead of the guest's own clock at "
++                    "video_mode_refresh_rate: frames then start right after a refresh and are shown at the next, "
++                    "one new frame a refresh (the two clocks drifting showed some frames twice and dropped others). "
++                    "Caps the game at the display's rate. Only with vsync on");
+ REXCVAR_DEFINE_BOOL(gpu_vblank_precise, false, "GPU",
+                     "Experimental: the guest vblank on time (the vsync worker sleeps to the next vblank). Off: it "
+                     "checks the clock every 1+ ms, and each vblank comes up to a millisecond late");
+@@ -161,7 +170,29 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+             std::max(uint64_t(1), uint64_t(double(guest_tick_frequency) / refresh_rate_hz));
+         uint64_t no_vsync_interval_ticks = std::max(uint64_t(1), guest_tick_frequency / 1000);
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
++#if REX_HAS_DISPLAY_VBLANK
++        std::unique_ptr<DisplayVblank> display;
++        if (REXCVAR_GET(gpu_vblank_display_sync)) {
++          display = DisplayVblank::Create();
++          if (display)
++            REXGPU_INFO("GPU vblank: on the display's refreshes ({:.2f} Hz)", display->refresh_hz());
++          else
++            REXGPU_WARN("GPU vblank: no display link; the guest clock at {:.0f} Hz instead", refresh_rate_hz);
++        }
++#endif
+         while (vsync_worker_running_) {
++#if REX_HAS_DISPLAY_VBLANK
++          if (display && REXCVAR_GET(vsync)) {
++            // One vblank a refresh; without one for 2.5 refresh periods (the display asleep), one anyway, so the
++            // game goes on at a lower rate.
++            const auto timeout = std::chrono::microseconds(
++                int64_t(2.5e6 / std::max(display->refresh_hz(), 1.0)));
++            display->WaitForRefresh(timeout);
++            MarkVblank();
++            last_frame_time = chrono::Clock::QueryGuestTickCount();
++            continue;
++          }
++#endif
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
+           uint64_t interval_ticks =
+               REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
+-- 
+2.56.0
+

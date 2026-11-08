@@ -27,7 +27,11 @@ struct Setting: Identifiable {
                 kind: .choice([("metalfx", "MetalFX spatial"), ("bilinear", "Bilinear")]), defaultValue: .string("metalfx")),
         Setting(key: "fullscreen", title: "Fullscreen", detail: "Off: a window (it can be resized).",
                 kind: .toggle, defaultValue: .bool(false)),
-        Setting(key: "video_mode_refresh_rate", title: "Frame rate",
+        Setting(key: "gpu_vblank_display_sync", title: "Sync to the display",
+                detail: "Smoothest: one new frame every refresh of the screen (60 FPS on a 60 Hz display). "
+                    + "Off: the frame rate below, faster but less even.",
+                kind: .toggle, defaultValue: .bool(true)),
+        Setting(key: "video_mode_refresh_rate", title: "Frame rate when not synced",
                 detail: "The game paces its frames by this clock. 240: uncapped (as fast as the Mac draws them). "
                     + "60: as on the console.",
                 kind: .numberChoice([(240, "Uncapped (up to 240)"), (120, "Up to 120"), (60, "60, as on the console")]),
@@ -35,6 +39,13 @@ struct Setting: Identifiable {
         Setting(key: "vsync", title: "Pace frames by that clock",
                 detail: "Off: no pacing at all; faster still, but frames come at uneven times (choppy).",
                 kind: .toggle, defaultValue: .bool(true)),
+        Setting(key: "fifa19_temporal_aa", title: "Temporal anti-aliasing (MetalFX)",
+                detail: "Less shimmer on lines and edges, sharpened after it. Fast-moving players may leave faint trails.",
+                kind: .toggle, defaultValue: .bool(false)),
+        Setting(key: "frame_generation", title: "Frame generation (MetalFX)",
+                detail: "A frame generated between every two when the game runs below the display's rate: "
+                    + "cut-scenes and replays (30 FPS) at 60. Turns temporal anti-aliasing on. macOS 26.",
+                kind: .choice([("off", "Off"), ("fsr", "On")]), defaultValue: .string("off")),
         Setting(key: "metal_gpu_fences", title: "GPU fences",
                 detail: "Needed for the pitch's shadows (they are baked from GPU work at match load).",
                 kind: .toggle, defaultValue: .bool(true)),

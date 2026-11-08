@@ -28,6 +28,10 @@ REXCVAR_DEFINE_STRING(fifa19_gpu_backend, "metal", "FIFA19",
 // Unattended test runs name their window, so a player can tell them from a game they started.
 REXCVAR_DEFINE_STRING(fifa19_window_title, "FIFA 19", "FIFA19", "The window's title")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(fifa19_temporal_aa, false, "FIFA19",
+                    "MetalFX temporal anti-aliasing of the 3D scene: less shimmer on lines and edges (sharpened "
+                    "after it, metal_taa_sharpness). Players' own motion isn't in its vectors yet. Restart")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // The keyboard plays as pad one (merged with any real pad), laid out like FIFA's keyboard-only Classic controls on
 // PC: arrows move, W/A/S/D are through ball / lob / pass / shoot. These are defaults: the config file, the command
@@ -79,10 +83,31 @@ static void SetMetalDefaults() {
       {"metal_present_upscale", "metalfx"},
       // A stall of 2 s leaves every thread's stack in stall-<time>.txt in the working folder.
       {"metal_stall_sample_ms", "2000"},
+      // Smooth: the guest vblank on each refresh of the display, so every refresh shows the next game frame (a
+      // match on a 60 Hz screen: 60.1 frames shown a second, none repeated or dropped, each 16.7 ms of game time
+      // +-0.7 ms). Paced by its own 240 Hz clock the game made ~80 frames a second at uneven times and each
+      // refresh showed the newest: motion stepped 12 to 24 ms a refresh, which shows as judder on the crowd.
+      // false: video_mode_refresh_rate's clock (uncapped at 240).
+      {"gpu_vblank_display_sync", "true"},
+      // Temporal AA's place in FIFA's frames (temporal_aa_anchor_ps, temporal_aa_camera; on with
+      // fifa19_temporal_aa): the pass runs before the composite that first reads the scene (pixel shader
+      // C4F1B7FC, texture 0 the 1280x720 scene; the depth is the frame's last depth resolve), and the camera is
+      // the view-projection in the scene's vertex shaders' constants: the players' (443F0A79: c1-c4 after
+      // skinning to world space; F4EC1B9B, 6798832A: c1-c4) and the skinned props' (EC79FAF2, 71347B6C:
+      // c0-c3 after their world matrix in c32-c35). Found in a match frame dump (docs/METAL.md).
+      // Cut-scenes (the walk-out, replays): their composite is 758B47F9 (the scene at 1DFAD000), and their
+      // close-up players' shaders A54BD766 (c2-c5) and 06C55BAD (c1-c4), skinned to world space too.
+      {"temporal_aa_anchor_ps", "C4F1B7FC4C922703,758B47F940466C31"},
+      {"temporal_aa_camera",
+       "443F0A79A4511E2A:1,EC79FAF2D2D5D3A2:0,71347B6C3E6EF3F3:0,F4EC1B9B71624CC5:1,6798832ABD1C5D32:1,"
+       "A54BD766ED344F7E:2,06C55BAD4F0661F5:1"},
+      // FIFA writes no guest markers: the tone map begins at the composite, the HUD at its pixel shader
+      // (00801335, also the menus'). The UI layer (frame generation, HDR) keys on them; nothing else changes.
+      {"guest_marker_rules", "C4F1B7FC4C922703:tonemap,758B47F940466C31:tonemap,0080133593CCBAE3:ui"},
   };
   for (const auto& [name, value] : kDefaults) {
     if (!rex::cvar::SetDefaultValue(name, value)) {
-      REXLOG_WARN("fifa19: no Metal default for {} (another GPU backend?)", name);
+      REXLOG_WARN("fifa19: no GPU default for {} (another GPU backend?)", name);
     }
   }
 }
@@ -92,11 +117,10 @@ void Fifa19App::OnPreSetup(rex::RuntimeConfig& config) {
   SetKeyboardDefaults();
   // A window by default (the SDK starts fullscreen); fullscreen=true in fifa19.toml or on the command line.
   rex::cvar::SetDefaultValue("fullscreen", "false");
-  // Uncapped, smoothly: the game paces its frames by the guest's vblank, and that clock runs at 240 Hz instead of
-  // the console's 60, so frames come as fast as the game makes them (about 80 a second in a match on an M5) on an
-  // even 4 ms grid. FIFA's simulation is time-based: the match clock runs at the same rate as at 60 Hz (measured).
-  // vsync=false (the vblank every millisecond) is faster still but uneven; video_mode_refresh_rate=60 is the
-  // console's cap.
+  // The guest vblank's own clock when it isn't synced to the display (gpu_vblank_display_sync=false, below): 240 Hz
+  // instead of the console's 60, so frames come as fast as the game makes them (about 80 a second in a match on an
+  // M5). FIFA's simulation is time-based: the match clock runs at the same rate as at 60 Hz (measured).
+  // vsync=false (the vblank every millisecond) is faster still but uneven.
   rex::cvar::SetDefaultValue("video_mode_refresh_rate", "240");
   if (config.gpu_plugin.empty()) {
     config.gpu_plugin = "xenos";
@@ -192,6 +216,11 @@ void Fifa19App::OnPostSetup() {
   // EA's engine (as in FIFA Street) leaves texture fetch constants tagged invalid whose address and
   // format fields are still in use.
   rex::cvar::SetFlagByName("gpu_allow_invalid_fetch_constants", "true");
+  // temporal_aa is a title's runtime switch (not read from a config file): FIFA's own setting sets it, and so
+  // does frame generation, which on Metal takes the temporal pass's depth and motion vectors.
+  if (REXCVAR_GET(fifa19_temporal_aa) || rex::cvar::GetFlagByName("frame_generation") != "off") {
+    rex::cvar::SetFlagByName("temporal_aa", "fsr");
+  }
   Fifa19DevPadStart();
 }
 

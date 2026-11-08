@@ -1,0 +1,120 @@
+From 87c9ea89c2e40222fb2a4df96362e5877336840e Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 03:51:56 +0700
+Subject: [PATCH] metal: contrast-adaptive sharpening after MetalFX temporal AA
+
+MetalFX's temporal scaler at the native size softens the picture: in a
+FIFA 19 match half the local contrast of the picture without it, with
+or without jitter, the camera still. metal_taa_sharpness (0.6) sharpens
+its output as AMD's CAS does, each pixel against its four neighbours,
+limited by the room the local minimum and maximum leave: 11.2 against
+10.4 without temporal AA and 5.2 unsharpened, grass texture kept, edges
+smooth.
+---
+ src/graphics/metal/metal_draw.h    |  2 ++
+ src/graphics/metal/metal_draw.mm   | 32 ++++++++++++++++++++++++++++--
+ src/graphics/metal/metal_resolve.h | 17 ++++++++++++++++
+ 3 files changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index 2a50f43..ddc731a 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -471,6 +471,8 @@ class MetalDraw {
+   id<MTLTexture> taa_motion_ = nil, taa_depth_ = nil, taa_output_ = nil;
+   id<MTLComputePipelineState> taa_vectors_pipeline_ = nil;
+   id<MTLComputePipelineState> taa_debug_pipeline_ = nil;  // metal_taa_debug_vectors
++  id<MTLComputePipelineState> taa_sharpen_pipeline_ = nil;  // metal_taa_sharpness
++  id<MTLTexture> taa_sharpened_ = nil;
+   id<MTLRenderPipelineState> taa_depth_pipeline_ = nil;
+   id<MTLDepthStencilState> taa_depth_state_ = nil;
+   bool taa_failed_ = false;
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 4ee6673..d9f43b9 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -87,6 +87,10 @@ REXCVAR_DEFINE_BOOL(metal_4x_as_1x, true, "GPU/Metal",
+     "MSAA 4x surfaces (the reflections) drawn at one sample a pixel instead of 2x2 supersampling: a quarter of their "
+     "pixel work, without their anti-aliasing (+5% FPS with MSAA 2x, +16% with MetalFX Performance)")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_DOUBLE(metal_taa_sharpness, 0.6, "GPU/Metal",
++    "Contrast-adaptive sharpening after MetalFX's temporal AA, 0 to 1 (MetalFX at the native size is soft: half "
++    "the local contrast of the picture without it); below 0: none")
++    .range(-1.0, 1.0);
+ REXCVAR_DEFINE_BOOL(metal_taa_debug_vectors, false, "GPU/Metal",
+     "Temporal AA development: the motion vectors drawn in place of the anti-aliased scene (hue: direction, "
+     "brightness: length, full at 8 pixels)");
+@@ -2974,6 +2978,28 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+     scaler.motionVectorScaleX = 1.0f; scaler.motionVectorScaleY = 1.0f;
+     scaler.reset = inputs.reset;
+     [scaler encodeToCommandBuffer:cb];
++    const float sharpness = float(REXCVAR_GET(metal_taa_sharpness));
++    if (sharpness >= 0.0f && !REXCVAR_GET(metal_taa_debug_vectors)) {
++      if (!taa_sharpen_pipeline_)
++        taa_sharpen_pipeline_ = [device_ newComputePipelineStateWithFunction:
++            [helper_library_ newFunctionWithName:@"taa_sharpen"] error:nil];
++      if (!taa_sharpened_ || taa_sharpened_.width != width || taa_sharpened_.height != height ||
++          taa_sharpened_.pixelFormat != color_format) {
++        auto d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:color_format width:width height:height
++                                                                mipmapped:NO];
++        d.storageMode = MTLStorageModePrivate; d.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
++        taa_sharpened_ = [device_ newTextureWithDescriptor:d];
++      }
++      if (taa_sharpen_pipeline_ && taa_sharpened_) {
++        auto sharpen = [cb computeCommandEncoder];
++        if (REXCVAR_GET(metal_debug_labels)) sharpen.label = @"temporal AA sharpening";
++        [sharpen setComputePipelineState:taa_sharpen_pipeline_];
++        [sharpen setTexture:taa_output_ atIndex:0]; [sharpen setTexture:taa_sharpened_ atIndex:1];
++        [sharpen setBytes:&sharpness length:sizeof(sharpness) atIndex:0];
++        [sharpen dispatchThreads:MTLSizeMake(width, height, 1) threadsPerThreadgroup:MTLSizeMake(16, 8, 1)];
++        [sharpen endEncoding];
++      }
++    }
+     if (REXCVAR_GET(metal_taa_debug_vectors)) {
+       if (!taa_debug_pipeline_)
+         taa_debug_pipeline_ = [device_ newComputePipelineStateWithFunction:
+@@ -2986,9 +3012,11 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+         [debug endEncoding];
+       }
+     }
+-    // The anti-aliased scene in place of the scene, for the motion blur and anything after it.
++    // The anti-aliased (and sharpened) scene in place of the scene, for the motion blur and anything after it.
++    const bool sharpened = sharpness >= 0.0f && !REXCVAR_GET(metal_taa_debug_vectors) && taa_sharpen_pipeline_ &&
++                           taa_sharpened_;
+     auto blit = [cb blitCommandEncoder];
+-    [blit copyFromTexture:taa_output_ sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
++    [blit copyFromTexture:(sharpened ? taa_sharpened_ : taa_output_) sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+         sourceSize:MTLSizeMake(width, height, 1) toTexture:scene_base destinationSlice:0 destinationLevel:0
+         destinationOrigin:MTLOriginMake(0, 0, 0)];
+     [blit endEncoding];
+diff --git a/src/graphics/metal/metal_resolve.h b/src/graphics/metal/metal_resolve.h
+index 565b958..25fb289 100644
+--- a/src/graphics/metal/metal_resolve.h
++++ b/src/graphics/metal/metal_resolve.h
+@@ -510,6 +510,23 @@ kernel void taa_motion_vectors(constant TaaMvConstants& c [[buffer(0)]],
+   }
+   dest.write(float4(motion, 0.0f, 0.0f), p);
+ }
++// Temporal AA's sharpening (metal_taa_sharpness): contrast-adaptive, as AMD's CAS. Each pixel against its four
++// neighbours, the amount limited by how much room the local minimum and maximum leave, so edges don't ring.
++kernel void taa_sharpen(texture2d<float, access::read> source [[texture(0)]],
++    texture2d<float, access::write> dest [[texture(1)]], constant float& sharpness [[buffer(0)]],
++    uint2 p [[thread_position_in_grid]]) {
++  const uint w = source.get_width(), h = source.get_height();
++  if (p.x >= w || p.y >= h) return;
++  float4 c = source.read(p);
++  float3 n = source.read(uint2(p.x, p.y ? p.y - 1u : 0u)).rgb, s = source.read(uint2(p.x, min(p.y + 1u, h - 1u))).rgb;
++  float3 e = source.read(uint2(min(p.x + 1u, w - 1u), p.y)).rgb, wv = source.read(uint2(p.x ? p.x - 1u : 0u, p.y)).rgb;
++  float3 lo = min(c.rgb, min(min(n, s), min(e, wv))), hi = max(c.rgb, max(max(n, s), max(e, wv)));
++  // CAS's weight: the room to the nearer limit over the maximum, scaled from -1/8 (sharpness 0) to -1/5 (1).
++  float3 amount = sqrt(saturate(min(lo, 1.0f - hi) / max(hi, 1.0e-5f)));
++  float3 weight = amount * -mix(0.125f, 0.2f, sharpness);
++  float3 result = (c.rgb + (n + s + e + wv) * weight) / (1.0f + 4.0f * weight);
++  dest.write(float4(saturate(result), c.a), p);
++}
+ // temporal AA development (metal_taa_debug_vectors): the motion vectors drawn in place of the anti-aliased
+ // scene, hue the direction, brightness the length (full at 8 pixels).
+ kernel void taa_debug_vectors(texture2d<float, access::read> motion [[texture(0)]],
+-- 
+2.56.0
+
