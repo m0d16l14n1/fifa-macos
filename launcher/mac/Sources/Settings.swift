@@ -40,8 +40,8 @@ struct Setting: Identifiable {
                 detail: "Off: no pacing at all; faster still, but frames come at uneven times (choppy).",
                 kind: .toggle, defaultValue: .bool(true)),
         Setting(key: "fifa19_temporal_aa", title: "Temporal anti-aliasing (MetalFX)",
-                detail: "Less shimmer on lines and edges, sharpened after it. Fast-moving players may leave faint trails.",
-                kind: .toggle, defaultValue: .bool(false)),
+                detail: "Less shimmer on lines and edges, sharpened after it. No measurable cost in FPS.",
+                kind: .toggle, defaultValue: .bool(true)),
         Setting(key: "frame_generation", title: "Frame generation (MetalFX)",
                 detail: "A frame generated between every two when the game runs below the display's rate: "
                     + "cut-scenes and replays (30 FPS) at 60. Turns temporal anti-aliasing on. macOS 26.",

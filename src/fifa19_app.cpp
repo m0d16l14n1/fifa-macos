@@ -28,9 +28,10 @@ REXCVAR_DEFINE_STRING(fifa19_gpu_backend, "metal", "FIFA19",
 // Unattended test runs name their window, so a player can tell them from a game they started.
 REXCVAR_DEFINE_STRING(fifa19_window_title, "FIFA 19", "FIFA19", "The window's title")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-REXCVAR_DEFINE_BOOL(fifa19_temporal_aa, false, "FIFA19",
-                    "MetalFX temporal anti-aliasing of the 3D scene: less shimmer on lines and edges (sharpened "
-                    "after it, metal_taa_sharpness). Players' own motion isn't in its vectors yet. Restart")
+REXCVAR_DEFINE_BOOL(fifa19_temporal_aa, true, "FIFA19",
+                    "MetalFX temporal anti-aliasing of the 3D scene: less shimmer on lines and edges, sharpened "
+                    "after it (metal_taa_sharpness). No measurable FPS cost (matches are bound by the command "
+                    "processor); running players show no trails at the match camera. Restart")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 // The keyboard plays as pad one (merged with any real pad), laid out like FIFA's keyboard-only Classic controls on
