@@ -1,0 +1,105 @@
+From 3d5aae45e673a660aaed04c1d66ceb4045a0f6d5 Mon Sep 17 00:00:00 2001
+From: Nick <nick@localhost>
+Date: Sun, 8 Nov 2026 20:33:16 +0700
+Subject: [PATCH] Access violations: the host PC and return address in the log
+ line (atos names the function)
+
+---
+ include/rex/system/mmio_handler.h |  5 +++++
+ src/system/mmio_handler.cpp       | 12 ++++++++++++
+ src/system/xmemory.cpp            | 18 ++++++++++++++++--
+ 3 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/include/rex/system/mmio_handler.h b/include/rex/system/mmio_handler.h
+index 7ae42a8..2ef055e 100644
+--- a/include/rex/system/mmio_handler.h
++++ b/include/rex/system/mmio_handler.h
+@@ -25,6 +25,11 @@ class HostThreadContext;
+ 
+ namespace rex::runtime {
+ 
++// The host PC and return address of this thread's last unhandled guest access violation, set just before the
++// access violation callback runs (its log line names them; atos turns them into the recompiled function).
++extern thread_local uint64_t last_fault_pc;
++extern thread_local uint64_t last_fault_lr;
++
+ typedef uint32_t (*MMIOReadCallback)(void* ppc_context, void* callback_context, uint32_t addr);
+ typedef void (*MMIOWriteCallback)(void* ppc_context, void* callback_context, uint32_t addr,
+                                   uint32_t value);
+diff --git a/src/system/mmio_handler.cpp b/src/system/mmio_handler.cpp
+index 2b93005..f7d6453 100644
+--- a/src/system/mmio_handler.cpp
++++ b/src/system/mmio_handler.cpp
+@@ -364,6 +364,9 @@ bool MMIOHandler::TryDecodeLoadStore(const uint8_t* p, DecodedLoadStore& decoded
+ #endif  // REX_ARCH
+ }
+ 
++thread_local uint64_t last_fault_pc = 0;
++thread_local uint64_t last_fault_lr = 0;
++
+ bool MMIOHandler::ExceptionCallbackThunk(arch::Exception* ex, void* data) {
+   return reinterpret_cast<MMIOHandler*>(data)->ExceptionCallback(ex);
+ }
+@@ -417,6 +420,15 @@ bool MMIOHandler::ExceptionCallback(arch::Exception* ex) {
+     // The address is not found within any range, so either a write watch or an
+     // actual access violation.
+     if (access_violation_callback_) {
++      // Where the guest code faulted, for the access violation's log line (the host PC and return address
++      // name the recompiled function with atos).
++#if REX_ARCH_ARM64
++      last_fault_pc = ex->pc();
++      last_fault_lr = ex->thread_context() ? ex->thread_context()->x[30] : 0;
++#else
++      last_fault_pc = ex->pc();
++      last_fault_lr = 0;
++#endif
+       return access_violation_callback_(std::move(lock), access_violation_callback_context_,
+                                         fault_host_address, is_write);
+     }
+diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
+index 757a397..9055d52 100644
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -22,6 +22,9 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/platform.h>
++#if REX_PLATFORM_MAC
++#include <mach-o/dyld.h>
++#endif
+ #if REX_PLATFORM_PS5
+ #include <sys/mman.h>
+ #include <cerrno>
+@@ -566,6 +569,15 @@ runtime::MMIORange* Memory::LookupVirtualMappedRange(uint32_t virtual_address) {
+   return mmio_handler_->LookupRange(virtual_address);
+ }
+ 
++// Where the program's image is loaded (for atos -l): the main executable's Mach-O header on macOS.
++static uintptr_t ProgramBase() {
++#if REX_PLATFORM_MAC
++  return reinterpret_cast<uintptr_t>(_dyld_get_image_header(0));
++#else
++  return 0;
++#endif
++}
++
+ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> global_lock_locked_once,
+                                      void* host_address, bool is_write) {
+ #if REX_PLATFORM_PS5
+@@ -587,9 +599,11 @@ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> glob
+     const uint64_t n = unhandled.fetch_add(1, std::memory_order_relaxed) + 1;
+     if (n <= 32 || n % 100000 == 0) {
+       REXSYS_ERROR(
+-          "Unhandled guest access violation: {} of guest 0x{:08X} (host 0x{:016X}) on thread 0x{:X} ({} so far)",
++          "Unhandled guest access violation: {} of guest 0x{:08X} (host 0x{:016X}) on thread 0x{:X} ({} so far); "
++          "host pc 0x{:X} lr 0x{:X}, program loaded at 0x{:X}",
+           is_write ? "write" : "read", virtual_address, reinterpret_cast<uintptr_t>(host_address),
+-          rex::thread::current_thread_id(), n);
++          rex::thread::current_thread_id(), n, runtime::last_fault_pc, runtime::last_fault_lr,
++          ProgramBase());
+     }
+     return false;
+   }
+-- 
+2.56.0
+
