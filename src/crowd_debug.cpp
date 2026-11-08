@@ -120,10 +120,14 @@ void Fifa19CrowdDebugSeen(uint32_t crowd) {
 
 REXCVAR_DEFINE_BOOL(fifa19_crowd_writers, false, "FIFA19",
                     "Development: log the functions that write the crowd's cell visibility (with fifa19_crowd_debug)");
+REXCVAR_DEFINE_BOOL(fifa19_crowd_readers, false, "FIFA19",
+                    "Development: log the functions that read or write the crowd object's +208..+224 (its 'a cell is "
+                    "visible' flag and the visible cells' batch mask), with fifa19_crowd_debug");
 
 namespace {
 std::atomic<uintptr_t> g_watch_lo{0}, g_watch_hi{0}, g_watch_page{0};
 std::atomic<bool> g_watch_armed{false};
+std::atomic<int> g_watch_protection{PROT_READ};
 constexpr int kPcSlots = 64;
 std::atomic<uintptr_t> g_pcs[kPcSlots];
 std::atomic<uint32_t> g_pc_counts[kPcSlots];
@@ -168,7 +172,7 @@ void WatchWriters(uint8_t* host_begin, uint32_t bytes) {
     for (;;) {
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
       if (!g_watch_armed.exchange(true))
-        mprotect(reinterpret_cast<void*>(g_watch_page.load()), page_size, PROT_READ);
+        mprotect(reinterpret_cast<void*>(g_watch_page.load()), page_size, g_watch_protection.load());
       if (std::chrono::steady_clock::now() - last_log > std::chrono::seconds(2)) {
         last_log = std::chrono::steady_clock::now();
         std::string line;
@@ -180,7 +184,7 @@ void WatchWriters(uint8_t* host_begin, uint32_t bytes) {
           line += fmt::format(" {}+{:X} x{}", dl.dli_sname ? dl.dli_sname : "?",
                               dl.dli_saddr ? pc - reinterpret_cast<uintptr_t>(dl.dli_saddr) : 0, g_pc_counts[i].load());
         }
-        if (!line.empty()) REXLOG_INFO("fifa19: crowd visibility writers:{}", line);
+        if (!line.empty()) REXLOG_INFO("fifa19: crowd watched accesses:{}", line);
       }
     }
   }).detach();
@@ -188,6 +192,16 @@ void WatchWriters(uint8_t* host_begin, uint32_t bytes) {
 }  // namespace
 
 void Fifa19CrowdWatchWriters(uint32_t crowd) {
+  if (REXCVAR_GET(fifa19_crowd_readers)) {
+    static std::once_flag once_readers;
+    std::call_once(once_readers, [crowd] {
+      auto* memory = rex::Runtime::instance()->memory();
+      g_watch_protection = PROT_NONE;
+      REXLOG_INFO("fifa19: watching accesses to the crowd {:08X}+208..224", crowd);
+      WatchWriters(memory->TranslateVirtual(crowd + 208), 16);
+    });
+    return;
+  }
   if (!REXCVAR_GET(fifa19_crowd_writers)) return;
   static std::once_flag once;
   std::call_once(once, [crowd] {
@@ -307,4 +321,21 @@ REX_HOOK_RAW(sub_829F6C80) {
   REXLOG_INFO("fifa19: crowd cull {:08X} frustum {:08X}:{} box [{:.1f} {:.1f} {:.1f} {:.1f}]-[{:.1f} {:.1f} {:.1f} {:.1f}]",
               crowd, frustum, planes, f(crowd + 176), f(crowd + 180), f(crowd + 184), f(crowd + 188), f(crowd + 192),
               f(crowd + 196), f(crowd + 200), f(crowd + 204));
+}
+
+// The crowd's level of detail per visible cell (sub_829F6D98(stand, index, view-projection, ..., minimum level in
+// r9)): the stand's maximum level less one for each on-screen size threshold (128, 64, 32, 16, 8) the cell passes,
+// at least r9. Levels 0 and 1, which close cameras pick for the stands nearest them (the walk-out's warm-up and
+// close shots), draw nothing here and hitch the frame (BACKLOG C7: an even 30 FPS walk-out at 2, against 83 ms
+// presents and 14 ms of judder at the game's levels). Level 2 is the most detailed that draws: the default.
+REXCVAR_DEFINE_INT32(fifa19_crowd_min_level, 2, "FIFA19",
+                     "The crowd's most detailed level allowed (C7): 0 and 1 leave the stands empty in close shots and "
+                     "hitch, 2 draws them; -1: the game's own choice")
+    .range(-1, 6);
+REX_EXTERN(__imp__sub_829F6D98);
+
+REX_HOOK_RAW(sub_829F6D98) {
+  const int32_t min_level = REXCVAR_GET(fifa19_crowd_min_level);
+  if (min_level >= 0 && ctx.r9.s32 < min_level) ctx.r9.s64 = min_level;
+  __imp__sub_829F6D98(ctx, base);
 }
