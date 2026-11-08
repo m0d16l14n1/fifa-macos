@@ -14,8 +14,9 @@
 #   WEATHER  0 clear, 1 rain, 2 snow, 3 overcast
 #
 # e.g. sh scripts/conditions.sh 1:3:1 1:1:0 13:3:2     (night rain, day clear, night snow)
-# Results: out/conditions/<stadium>-<time>-<weather>/ (walkout.png, play.png, burst-*.ppm, flicker.txt from
-# scripts/flicker.py with the flickering frames outlined in burst-*.flicker.png, present.txt, log.txt).
+# Results: out/conditions/<stadium>-<time>-<weather>/ (walkout.png, play.png; burst-*.ppm, 90 frames of the
+# walk-out, and play-*.ppm, 120 of play; flicker-burst.txt and flicker-play.txt from scripts/flicker.py, with the
+# flickering frames outlined in *.flicker.png; present.txt; log.txt).
 set -e
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 out="$repo/out/conditions" wait=55 home=11 away=9 settings=""
@@ -44,7 +45,7 @@ shot walkout
 burst burst 90
 wait 40s
 shot play
-wait 20s
+burst play 120
 quit
 EOF
   echo "== stadium $stadium, time $time, weather $weather"
@@ -55,8 +56,11 @@ EOF
   cp "$log" "$dir/log.txt" 2>/dev/null || true
   python3 "$repo/scripts/ppm2png.py" "$dir/walkout.ppm" "$dir/play.ppm" --scale 2 > /dev/null 2>&1 || true
   [ -f "$dir/present.csv" ] && python3 "$repo/scripts/present_stats.py" "$dir/present.csv" --from 60 > "$dir/present.txt" 2>&1 || true
-  ls "$dir"/burst-*.ppm > /dev/null 2>&1 && python3 "$repo/scripts/flicker.py" "$dir"/burst-*.ppm --png > "$dir/flicker.txt" 2>&1 || true
-  [ -f "$dir/flicker.txt" ] && tail -1 "$dir/flicker.txt"
-  grep -a "Unhandled guest\|FAILED\|crash" "$dir/log.txt" | head -3 || true
+  for burst in burst play; do
+    ls "$dir/$burst"-*.ppm > /dev/null 2>&1 || continue
+    python3 "$repo/scripts/flicker.py" "$dir/$burst"-*.ppm --png > "$dir/flicker-$burst.txt" 2>&1 || true
+    echo "   $burst: $(tail -1 "$dir/flicker-$burst.txt")"
+  done
+  grep -a "Unhandled guest\|dev pad: FAILED\|audio underrun" "$dir/log.txt" | head -3 || true
   echo "   $dir"
 done

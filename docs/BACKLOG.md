@@ -8,7 +8,7 @@ how it is checked. Done items move to the end with their date.
 | # | Item | Seen | Check |
 |---|---|---|---|
 | C2 | Every mode toured with shots: Kick Off is mapped; the main menu's Home and Play tabs and Skill Games' arena player select are right (2026-11-08, live through `--fifa19_pad_pipe`); Career, Ultimate Team (CardsDLLzf), Tournaments, the skill games themselves, Women's, Champions League not yet | | shots per mode, compared |
-| C3 | Stadium × time of day × weather matrix, now a quick match each (`scripts/conditions.sh`, EA's auto match booted straight into): shadows, rain, snow, night lighting. The player saw many flickers in rainy night matches (2026-11-08) | user report | a shot and a burst per combination, no frame differing from both neighbours |
+| C3 | Stadium × time of day × weather matrix, now a quick match each (`scripts/conditions.sh`, EA's auto match booted straight into): shadows, rain, snow, night lighting. The player saw many flickers in rainy night matches (2026-11-08). First matrix at Old Trafford (2026-11-08, night rain, night snow, day clear; defaults and the player's settings): no flicker in 90 walk-out and 120 play frames each (`scripts/flicker.py`), one bright one-frame blob in a night-snow walk-out (a near snowflake?). Not yet: replays, other stadiums, close-ups | user report | a shot and a burst per combination, no frame differing from both neighbours |
 | C8 | Loading screens: now and then a black 512x512 square over the title screen's picture (guest x 512-1024, y 0-512: one tile of the background missing) | user screenshot, 2026-11-08 | not seen in a dozen boots |
 | C9 | Quick match: with random teams the line-up card lists every player under one name (the auto match's random squads); fixed team ids show real squads | quick match runs | |
 | C5 | `Presenter: UI overlay painting isn't available with this graphics backend` at start: the presenter's separate UI layer (for frame generation) has no Metal implementation; the F3/F4 overlays still draw over the picture. Needed for T5 | every boot log | F3/F4 visible in a shot; the line gone once T5 lands |
@@ -30,7 +30,8 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item | Check |
 |---|---|---|
-| A3 | Sound now and then laggy, off-pitch or chopping in the player's matches (2026-11-08, with vsync off and display sync off: unpaced frames). Count underruns in those settings and at the defaults (`sdl_audio_driver` warnings) | underrun counts per setting |
+| A3 | Sound now and then laggy, off-pitch or chopping in the player's matches (2026-11-08, with vsync off and display sync off: unpaced frames). No underrun in four quick matches (defaults and the player's settings; muted, the queue still runs). Listen with sound to a match in the player's settings | underrun counts per setting |
+| P11 | vsync off: frames reach the screen at once (`patches/fifa/0024`, `0025`), but with the player's settings the UI thread still made 3515 of 3534 presents at its 60 Hz tick: find which UI drawer reports content, so the guest thread presents each frame (the HUD's FPS above 60) | `out/conditions-user` present log | presents by the guest thread, above 60 a second |
 | A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback. Only for latency now: the SDL path has no underruns (A1, D20) | lower latency, still no underruns |
 | I1 | Controller hot-plug goes to pad one; DualSense/DualShock prompts where possible; rumble | plug/unplug mid-match |
 
