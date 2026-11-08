@@ -1,0 +1,47 @@
+From fb5a3178b43b0019d71298a38b98f7e08e9a4fe8 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 11:00:30 +0700
+Subject: [PATCH] metal: vsync off presents without waiting for the display
+
+With vsync=false the CAMetalLayer's displaySyncEnabled is off too: frames reach the screen as soon as they are
+drawn (tearing), so the Metal HUD shows the game's own frame rate instead of at most the display's.
+---
+ src/graphics/metal/metal_presenter.mm | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index 7804b42..02cfaa2 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -41,6 +41,7 @@ REXCVAR_DEFINE_INT32(metal_present_capture_burst, 0, "GPU/Metal",
+     "(consecutive frames, for flicker); counts down to 0");
+ 
+ REXCVAR_DECLARE(std::string, hdr);
++REXCVAR_DECLARE(bool, vsync);
+ REXCVAR_DECLARE(int32_t, frame_generation_debug);
+ REXCVAR_DEFINE_STRING(metal_present_upscale, "bilinear", "GPU/Metal",
+                       "How the guest's picture is enlarged to the window: bilinear, or metalfx (MetalFX's spatial "
+@@ -514,7 +515,11 @@ ui::Presenter::SurfacePaintConnectResult MetalPresenter::ConnectOrReconnectPaint
+     return SurfacePaintConnectResult::kFailureSurfaceUnusable;
+   }
+   const CGSize drawable_size = CGSizeMake(new_surface_width, new_surface_height);
+-  if (was_paintable && layer == layer_ && CGSizeEqualToSize(layer.drawableSize, drawable_size)) {
++  // vsync off: frames go to the screen as soon as they are drawn (above the display's rate, with tearing), so the
++  // frame rate the HUD shows is the game's own. On: one frame a refresh at most.
++  const BOOL display_sync = REXCVAR_GET(vsync) ? YES : NO;
++  if (was_paintable && layer == layer_ && CGSizeEqualToSize(layer.drawableSize, drawable_size) &&
++      layer.displaySyncEnabled == display_sync) {
+     is_vsync_implicit_out = layer.displaySyncEnabled;
+     return SurfacePaintConnectResult::kSuccessUnchanged;
+   }
+@@ -532,6 +537,7 @@ ui::Presenter::SurfacePaintConnectResult MetalPresenter::ConnectOrReconnectPaint
+   // The surface's size is in pixels already (SDL's pixel size of the window).
+   layer.drawableSize = drawable_size;
+   layer.maximumDrawableCount = 3;
++  layer.displaySyncEnabled = display_sync;
+   layer_ = layer;
+   is_vsync_implicit_out = layer.displaySyncEnabled;
+   REXGPU_INFO("Metal presenter: painting to a {}x{} CAMetalLayer, display sync {}", new_surface_width,
+-- 
+2.56.0
+

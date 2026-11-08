@@ -7,11 +7,13 @@ import Combine
 import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable {
-    case play = "Play", graphics = "Graphics", controls = "Controls", gameFiles = "Game Files", about = "About"
+    case play = "Play", quickMatch = "Quick Match", graphics = "Graphics", controls = "Controls",
+         gameFiles = "Game Files", about = "About"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .play: return "play.circle"
+        case .quickMatch: return "sportscourt"
         case .graphics: return "display"
         case .controls: return "gamecontroller"
         case .gameFiles: return "externaldrive"
@@ -20,9 +22,20 @@ enum Page: String, CaseIterable, Identifiable {
     }
 }
 
+// Tests (FIFA19_LAUNCHER_PLAY=1): the game starts when the launcher has finished launching, with or without a
+// window (macOS may restore none).
+final class LauncherDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard Game.testEnv["FIFA19_LAUNCHER_PLAY"] == "1" else { return }
+        if Game.testEnv["FIFA19_LAUNCHER_BACKGROUND"] == "1" { NSApp.setActivationPolicy(.accessory) }
+        Task { @MainActor in Game.shared.play() }
+    }
+}
+
 @main
 struct LauncherApp: App {
-    @StateObject private var game = Game()
+    @NSApplicationDelegateAdaptor(LauncherDelegate.self) private var delegate
+    @StateObject private var game = Game.shared
     @State private var page: Page? = Page(rawValue: ProcessInfo.processInfo.environment["FIFA19_LAUNCHER_PAGE"] ?? "") ?? .play
 
     var body: some Scene {
@@ -36,6 +49,7 @@ struct LauncherApp: App {
                 Group {
                     switch page ?? .play {
                     case .play: PlayPage()
+                    case .quickMatch: QuickMatchPage()
                     case .graphics: SettingsPage(title: "Graphics", settings: Setting.graphics)
                     case .controls: SettingsPage(title: "Controls", settings: Setting.controls)
                     case .gameFiles: GameFilesPage()
@@ -131,7 +145,38 @@ struct PlayPage: View {
         .onReceive(timer) { _ in logTail = Game.tail(of: game.paths.log, lines: 12) }
         .onAppear {
             logTail = Game.tail(of: game.paths.log, lines: 12)
-            if ProcessInfo.processInfo.environment["FIFA19_LAUNCHER_PLAY"] == "1" { game.play() }
+        }
+    }
+}
+
+// Quick Match: straight into a match, the CPU against the CPU, at the stadium, time of day and weather chosen here
+// (EA's own auto match, fifa19_quick_match): for trying conditions, or a benchmark, in about a minute.
+struct QuickMatchPage: View {
+    @EnvironmentObject var game: Game
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Quick Match").font(.title.bold())
+            Text("Straight into a match, no intro or menus: the CPU plays both teams. For trying a stadium, "
+                 + "a time of day and the weather in about a minute.").foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                if game.running == nil {
+                    Button { game.play(extra: ["--fifa19_quick_match=true"]) } label: {
+                        Label("Start the match", systemImage: "sportscourt.fill").frame(minWidth: 140)
+                    }
+                    .controlSize(.large)
+                    .disabled(!game.programInstalled || !game.gameInstalled)
+                } else {
+                    Button(role: .destructive) { game.stop() } label: {
+                        Label("Stop", systemImage: "stop.fill").frame(minWidth: 90)
+                    }.controlSize(.large)
+                    Text("Running").foregroundStyle(.secondary)
+                }
+            }
+            Form {
+                ForEach(Setting.quickMatch) { setting in SettingRow(setting: setting) }
+            }
+            .formStyle(.grouped)
         }
     }
 }

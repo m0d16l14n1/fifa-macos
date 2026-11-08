@@ -1,0 +1,127 @@
+From 2cc970361ee2d03aa9ff99b078ead2bb3e4aea93 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 11:26:47 +0700
+Subject: [PATCH] presenter: no busy repaints without vsync; guest-thread
+ presents when the UI is empty; TAA stencil view
+
+Without display sync the UI thread repainted as fast as it could on macOS (the UI tick limiter was Windows-only):
+the same picture ~100 times a second, taking time from the game. It now ticks at 60 Hz there. The guest output
+thread presents every frame itself when no UI drawer has anything to show, so with vsync off each game frame
+reaches the screen (and the HUD) at once. metal_taa_debug_stencil shows the scene's stencil values.
+---
+ src/graphics/metal/metal_draw.mm   | 19 ++++++++++++++++++-
+ src/graphics/metal/metal_resolve.h | 11 +++++++++++
+ src/ui/presenter.cpp               | 23 +++++++++++++++++++++--
+ 3 files changed, 50 insertions(+), 3 deletions(-)
+
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index d9f43b9..85285c5 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -91,6 +91,9 @@ REXCVAR_DEFINE_DOUBLE(metal_taa_sharpness, 0.6, "GPU/Metal",
+     "Contrast-adaptive sharpening after MetalFX's temporal AA, 0 to 1 (MetalFX at the native size is soft: half "
+     "the local contrast of the picture without it); below 0: none")
+     .range(-1.0, 1.0);
++REXCVAR_DEFINE_BOOL(metal_taa_debug_stencil, false, "GPU/Metal",
++                    "Temporal AA development: the scene's stencil values as colours in place of the anti-aliased "
++                    "scene (black: 0), and the values seen logged once");
+ REXCVAR_DEFINE_BOOL(metal_taa_debug_vectors, false, "GPU/Metal",
+     "Temporal AA development: the motion vectors drawn in place of the anti-aliased scene (hue: direction, "
+     "brightness: length, full at 8 pixels)");
+@@ -3000,6 +3003,19 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+         [sharpen endEncoding];
+       }
+     }
++    if (REXCVAR_GET(metal_taa_debug_stencil)) {
++      static id<MTLComputePipelineState> stencil_pipeline = [device_ newComputePipelineStateWithFunction:
++          [helper_library_ newFunctionWithName:@"taa_debug_stencil"] error:nil];
++      if (stencil_pipeline) {
++        auto debug = [cb computeCommandEncoder];
++        [debug setComputePipelineState:stencil_pipeline];
++        const uint32_t channel[4] = {uint32_t(constants.jitter[2]), 0, 0, 0};
++        [debug setTexture:stencil atIndex:0]; [debug setTexture:taa_output_ atIndex:1];
++        [debug setBytes:channel length:sizeof(channel) atIndex:0];
++        [debug dispatchThreads:MTLSizeMake(width, height, 1) threadsPerThreadgroup:MTLSizeMake(16, 8, 1)];
++        [debug endEncoding];
++      }
++    }
+     if (REXCVAR_GET(metal_taa_debug_vectors)) {
+       if (!taa_debug_pipeline_)
+         taa_debug_pipeline_ = [device_ newComputePipelineStateWithFunction:
+@@ -3013,7 +3029,8 @@ char MetalDraw::TaaRun(TaaInputs& inputs) {
+       }
+     }
+     // The anti-aliased (and sharpened) scene in place of the scene, for the motion blur and anything after it.
+-    const bool sharpened = sharpness >= 0.0f && !REXCVAR_GET(metal_taa_debug_vectors) && taa_sharpen_pipeline_ &&
++    const bool sharpened = sharpness >= 0.0f && !REXCVAR_GET(metal_taa_debug_vectors) &&
++                           !REXCVAR_GET(metal_taa_debug_stencil) && taa_sharpen_pipeline_ &&
+                            taa_sharpened_;
+     auto blit = [cb blitCommandEncoder];
+     [blit copyFromTexture:(sharpened ? taa_sharpened_ : taa_output_) sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+diff --git a/src/graphics/metal/metal_resolve.h b/src/graphics/metal/metal_resolve.h
+index 25fb289..0a50a25 100644
+--- a/src/graphics/metal/metal_resolve.h
++++ b/src/graphics/metal/metal_resolve.h
+@@ -537,6 +537,17 @@ kernel void taa_debug_vectors(texture2d<float, access::read> motion [[texture(0)
+   float3 hue = saturate(float3(abs(h - 3.0f) - 1.0f, 2.0f - abs(h - 2.0f), 2.0f - abs(h - 4.0f)));
+   out.write(float4(hue * saturate(length(m) / 8.0f), 1.0f), p);
+ }
++// temporal AA development (metal_taa_debug_stencil): the scene's stencil byte as a colour per value (its bits
++// spread over red, green and blue), to tell apart what the game marks in it.
++kernel void taa_debug_stencil(texture2d_array<float, access::read> stencil [[texture(0)]],
++    texture2d<float, access::write> out [[texture(1)]], constant uint4& c [[buffer(0)]],
++    uint2 p [[thread_position_in_grid]]) {
++  if (p.x >= out.get_width() || p.y >= out.get_height()) return;
++  uint2 source = min(p, uint2(stencil.get_width() - 1u, stencil.get_height() - 1u));
++  uint s = uint(stencil.read(source, 0)[c.x] * 255.0f + 0.5f);
++  float3 colour = float3(float((s * 37u) & 255u), float((s * 91u) & 255u), float((s * 157u) & 255u)) / 255.0f;
++  out.write(float4(s ? colour : float3(0.0f), 1.0f), p);
++}
+ // The depth for MetalFX, which takes a depth format (at the render size, from the same pixels as the vectors).
+ struct TaaDepthOut { float depth [[depth(any)]]; };
+ fragment TaaDepthOut taa_depth_fs(float4 position [[position]], texture2d_array<float, access::read> source [[texture(0)]],
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+index 75d29b1..522816b 100644
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -1880,9 +1880,11 @@ Presenter::PaintMode Presenter::GetDesiredPaintModeFromUIThread(bool is_paintabl
+     // the guest output.
+     return PaintMode::kUIThreadOnRequest;
+   }
+-  if (!ui_drawers_.empty()) {
++  if (!ui_drawers_.empty() && UIDrawersHaveContent()) {
+     // The UI can be drawn only by the UI thread, and it needs to be drawn -
+-    // paint in the UI thread.
++    // paint in the UI thread. (Drawers with nothing to show, such as an
++    // achievement notifier between notifications, don't count: a UI paint
++    // request when one has something takes painting back to the UI thread.)
+     return PaintMode::kUIThreadOnRequest;
+   }
+   // Only the guest output needs to be drawn - let the guest output thread
+@@ -2192,6 +2194,23 @@ void Presenter::WaitForUITickFromUIThread() {
+     }
+     dxgi_ui_tick_signal_condition_.wait(dxgi_ui_tick_lock);
+   }
++#else
++  // Elsewhere no vblank to wait for: a tick every 1/60 s, so a UI thread that repaints without vertical sync
++  // (a Metal layer with display sync off) doesn't present the same picture hundreds of times a second and take
++  // the CPU and GPU from the game.
++  if (!AreUITicksNeededFromUIThread()) {
++    return;
++  }
++  using clock = std::chrono::steady_clock;
++  static clock::time_point next_tick;
++  constexpr auto kTick = std::chrono::nanoseconds(16'666'667);
++  const auto now = clock::now();
++  if (now < next_tick) {
++    std::this_thread::sleep_until(next_tick);
++    next_tick += kTick;
++  } else {
++    next_tick = now + kTick;
++  }
+ #endif  // XE_PLATFORM
+ }
+ 
+-- 
+2.56.0
+

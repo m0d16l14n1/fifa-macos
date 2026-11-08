@@ -8,6 +8,7 @@ struct Setting: Identifiable {
         case toggle
         case choice([(value: String, label: String)])
         case numberChoice([(value: Double, label: String)])
+        case intChoice([(value: Int, label: String)])
         case number(range: ClosedRange<Int>)
         case text  // free text, applied when edited (a key binding: comma-separated SDL key names)
     }
@@ -28,6 +29,11 @@ struct Setting: Identifiable {
                 kind: .choice([("metalfx", "MetalFX spatial"), ("bilinear", "Bilinear")]), defaultValue: .string("metalfx")),
         Setting(key: "fullscreen", title: "Fullscreen", detail: "Off: a window (it can be resized).",
                 kind: .toggle, defaultValue: .bool(false)),
+        Setting(key: "fifa19_screen_fit", title: "Picture on a screen of another shape",
+                detail: "The game is 16:9. Fill: crops up to 5% of each edge instead of black bars (the HUD stays "
+                    + "whole; on a 16:10 screen thin bars remain). Fit: all of the picture, with black bars.",
+                kind: .choice([("fill", "Fill the screen"), ("fit", "Fit, with black bars"), ("stretch", "Stretch")]),
+                defaultValue: .string("fill")),
         Setting(key: "gpu_vblank_display_sync", title: "Sync to the display",
                 detail: "Smoothest: one new frame every refresh of the screen (60 FPS on a 60 Hz display). "
                     + "Off: the frame rate below, faster but less even.",
@@ -37,8 +43,9 @@ struct Setting: Identifiable {
                     + "60: as on the console.",
                 kind: .numberChoice([(240, "Uncapped (up to 240)"), (120, "Up to 120"), (60, "60, as on the console")]),
                 defaultValue: .double(240)),
-        Setting(key: "vsync", title: "Pace frames by that clock",
-                detail: "Off: no pacing at all; faster still, but frames come at uneven times (choppy).",
+        Setting(key: "vsync", title: "Vsync",
+                detail: "Off: no pacing at all, and frames go to the screen as soon as they are drawn: the HUD shows "
+                    + "the game's own frame rate above the display's, with tearing and uneven motion.",
                 kind: .toggle, defaultValue: .bool(true)),
         Setting(key: "fifa19_temporal_aa", title: "Temporal anti-aliasing (MetalFX)",
                 detail: "Less shimmer on lines and edges, sharpened after it. No measurable cost in FPS.",
@@ -56,6 +63,20 @@ struct Setting: Identifiable {
         Setting(key: "metal_hitch_log_ms", title: "Log frames slower than (ms)",
                 detail: "A 'Metal hitch' line in the log for each; 0 turns it off.",
                 kind: .number(range: 0...5000), defaultValue: .int(250)),
+    ]
+
+    // Quick Match (Play page): EA's own auto match, booted straight into (no intro, no menus), the CPU against the
+    // CPU, for trying a stadium, time of day and weather in a minute. Ids from the game (docs/DEBUGGING.md).
+    static let quickMatch: [Setting] = [
+        Setting(key: "fifa19_match_stadium", title: "Stadium", detail: "",
+                kind: .intChoice(QuickMatch.stadiums), defaultValue: .int(-1)),
+        Setting(key: "fifa19_match_time", title: "Time of day", detail: "",
+                kind: .intChoice(QuickMatch.times), defaultValue: .int(-1)),
+        Setting(key: "fifa19_match_weather", title: "Weather", detail: "",
+                kind: .intChoice(QuickMatch.weathers), defaultValue: .int(0)),
+        Setting(key: "fifa19_match_half_length", title: "Half length", detail: "",
+                kind: .intChoice([(2, "2 minutes"), (4, "4 minutes"), (6, "6 minutes"), (10, "10 minutes")]),
+                defaultValue: .int(4)),
     ]
 
     static let controls: [Setting] = [
@@ -109,15 +130,21 @@ struct SettingsPage: View {
             Text("Applied at the next start of the game.").foregroundStyle(.secondary)
             Form {
                 ForEach(settings) { setting in
-                    row(setting)
+                    SettingRow(setting: setting)
                 }
             }
             .formStyle(.grouped)
         }
     }
+}
 
-    @ViewBuilder
-    private func row(_ s: Setting) -> some View {
+// One setting: its control and its explanation.
+struct SettingRow: View {
+    @EnvironmentObject var game: Game
+    let setting: Setting
+
+    var body: some View {
+        let s = setting
         let current = game.value(s.key) ?? s.defaultValue
         VStack(alignment: .leading, spacing: 2) {
             switch s.kind {
@@ -132,6 +159,11 @@ struct SettingsPage: View {
             case .numberChoice(let options):
                 Picker(s.title, selection: Binding(get: { current.number ?? 0 },
                                                    set: { game.set(s.key, .double($0), default: s.defaultValue) })) {
+                    ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
+                }
+            case .intChoice(let options):
+                Picker(s.title, selection: Binding(get: { current.int ?? 0 },
+                                                   set: { game.set(s.key, .int($0), default: s.defaultValue) })) {
                     ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
                 }
             case .number(let range):
@@ -167,4 +199,12 @@ private struct KeyField: View {
             .onSubmit { commit(text) }
             .onChange(of: focused) { _, now in if !now { commit(text) } }
     }
+}
+
+// The Quick Match choices: the game's own ids for its stadiums, lighting and weather.
+enum QuickMatch {
+    static let stadiums: [(value: Int, label: String)] = [(-1, "The game picks")]
+    // The stadium's lighting (STADIUM_LIGHT_TYPE_ID): every stadium has these two.
+    static let times: [(value: Int, label: String)] = [(-1, "The game picks"), (1, "Day"), (3, "Night")]
+    static let weathers: [(value: Int, label: String)] = [(0, "Clear"), (1, "Rain"), (2, "Snow"), (3, "Overcast")]
 }

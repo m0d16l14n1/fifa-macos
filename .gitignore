@@ -29,3 +29,6 @@ build/
 *.rej
 __pycache__/
 *.pyc
+
+# Captures from test runs (dev pad shots, metal_present_capture) anywhere in the tree
+*.ppm
