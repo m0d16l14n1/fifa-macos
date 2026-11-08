@@ -25,8 +25,15 @@ struct Setting: Identifiable {
                 detail: "Metal is native. Vulkan runs through MoltenVK, for comparison.",
                 kind: .choice([("metal", "Metal"), ("vulkan", "Vulkan (MoltenVK)")]), defaultValue: .string("metal")),
         Setting(key: "metal_present_upscale", title: "Upscaling to the window",
-                detail: "The game draws 1280x720. MetalFX's spatial upscaler is sharper than bilinear.",
+                detail: "The picture at the internal resolution, fitted to the window. MetalFX's spatial upscaler is sharper than bilinear.",
                 kind: .choice([("metalfx", "MetalFX spatial"), ("bilinear", "Bilinear")]), defaultValue: .string("metalfx")),
+        Setting(key: "metal_resolution_scale", title: "Internal resolution",
+                detail: "What the game is drawn at, before it is fitted to the window. Each step up is sharper and "
+                    + "costs the GPU about that many times more: QHD wants an M-series Pro or better for 60 FPS, 4K a "
+                    + "Max or Ultra. (Whole multiples of the console's 1280x720 only: Full HD isn't one.)",
+                kind: .intChoice([(1, "HD 1280x720 (the console's, fastest)"), (2, "QHD 2560x1440 (4x the work)"),
+                                  (3, "4K 3840x2160 (9x)"), (4, "5K 5120x2880 (16x)")]),
+                defaultValue: .int(1)),
         Setting(key: "fullscreen", title: "Fullscreen", detail: "Off: a window (it can be resized).",
                 kind: .toggle, defaultValue: .bool(false)),
         Setting(key: "fifa19_screen_fit", title: "Picture on a screen of another shape",
