@@ -50,8 +50,26 @@ struct LauncherApp: App {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 game.reload()
             }
+            .onAppear { Snapshot.takeIfAsked() }
         }
         .windowResizability(.contentMinSize)
+    }
+}
+
+// Tests and docs: FIFA19_LAUNCHER_SNAPSHOT=<file.png> draws the launcher's window (the page FIFA19_LAUNCHER_PAGE
+// opens) into that file and quits. The window is the launcher's own, drawn by it: no screen recording permission,
+// and it never takes focus (a background app while it does this).
+enum Snapshot {
+    static func takeIfAsked() {
+        guard let path = ProcessInfo.processInfo.environment["FIFA19_LAUNCHER_SNAPSHOT"], !path.isEmpty else { return }
+        NSApp.setActivationPolicy(.accessory)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard let view = NSApp.windows.first(where: { $0.isVisible })?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let written = (try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))) != nil
+            exit(written ? 0 : 1)
+        }
     }
 }
 

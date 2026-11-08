@@ -7,7 +7,7 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item | Seen | Check |
 |---|---|---|---|
-| C2 | Every mode toured with shots: Kick Off is mapped; Career, Ultimate Team (CardsDLLzf), Tournaments, Skill Games, Women's, Champions League not yet | | `tour.txt` per mode, pictures compared |
+| C2 | Every mode toured with shots: Kick Off is mapped; the main menu's Home and Play tabs and Skill Games' arena player select are right (2026-11-08, live through `--fifa19_pad_pipe`); Career, Ultimate Team (CardsDLLzf), Tournaments, the skill games themselves, Women's, Champions League not yet | | shots per mode, compared |
 | C3 | Stadium × time of day × weather matrix (`scripts/pad/match.sh`): shadows, rain, snow, night lighting | | a shot per combination |
 | C5 | `Presenter: UI overlay painting isn't available with this graphics backend` at start: the presenter's separate UI layer (for frame generation) has no Metal implementation; the F3/F4 overlays still draw over the picture. Needed for T5 | every boot log | F3/F4 visible in a shot; the line gone once T5 lands |
 | C6 | `gamecontrollerdb.txt` missing: SDL's built-in mappings are used; ship the community database for unusual pads | every boot log | a third-party pad maps right |
@@ -18,7 +18,7 @@ how it is checked. Done items move to the end with their date.
 | # | Item | Seen | Check |
 |---|---|---|---|
 | P5 | The main loop's step limiter (`sub_823686C0`, 1/200 s) spins a whole core (~97% of the main thread). A sleeping version (`src/native_frame_limiter.cpp`, `FIFA19_NATIVE_LIMITER=1`) makes another guest thread fault reading 0x1 in a loop: a race the spin's timing hides (seen with vsync off; a 4-minute run at the default 240 Hz pacing had no fault and no pacing gain). Find the racing thread (sample at the first fault) | sample of a match; limiter run | the hook on by default, no faults over a full match |
-| P6 | Cut-scenes (walk-out, replays) run the game's own 25 ms minimum frame time and ~25 ms of command processor work (1,000-1,300 draws, ~70 resolves, ~100 render passes a frame): an even 30 FPS synced to a 60 Hz display. 60 needs the command processor near 16 ms there: texture lookups (`TextureSlow`, compose of the two scene tiles), encoder creation (many small passes), then lifting the game's 1/40 limiter | `walk*` runs, `scripts/sample_self.py` on a sample | 60 in the walk-out |
+| P6 | Cut-scenes: the game's own 25 ms minimum frame time and ~25 ms of command processor work (an even 30 FPS synced; 60 on screen with frame generation). Matches are not bound by the command processor (it waits for the game 22% of the time in an uncapped match, `cps2` sample): their FPS is the game's CPU work. What's left in the command processor is spread thin (Objective-C retain/release 6%, Bind 3%, hashing 3%) | `walk*`, `cps2` samples, `scripts/sample_self.py` | 60 in the walk-out without frame generation |
 | P9 | The guest vblank worker checks the clock every 1+ ms, so vblanks are up to a millisecond late. `gpu_vblank_precise=true` (`patches/fifa/0017`) sleeps to each vblank: one quiet 60 Hz match p99 16.8 ms (17.7 polled); on a loaded machine (Spotlight indexing) 27 missed vblanks in 30 s against 13 polled and 9 for the build before the wait fix; at 240 Hz two alternating pairs split. Measure over several runs on a quiet machine before turning it on | `vb60`, `final60`, `base60` runs, 2026-11-07 | fewer missed vblanks than polled, over 3+ runs each |
 | P10 | The heaviest moments of a match (replays) are the cut-scene path (P6) | | |
 | P2 | GPU busy in menus is 4-9 ms, in the match 20+ ms of command buffer time a frame: find the passes (`metal_debug_profile` on a dumped frame) | tour log | GPU under 10 ms in a match |
@@ -30,14 +30,13 @@ how it is checked. Done items move to the end with their date.
 |---|---|---|
 | A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback. Only for latency now: the SDL path has no underruns (A1, D20) | lower latency, still no underruns |
 | I1 | Controller hot-plug goes to pad one; DualSense/DualShock prompts where possible; rumble | plug/unplug mid-match |
-| I2 | The launcher's Controls page edits the keyboard layout (`keybind_*` cvars) | |
 
 ## Temporal, frame generation, Metal 4 (M5, M6)
 
 | # | Item |
 |---|---|
 | T8 | Frame generation: at some walk-out cuts one presented frame is a blend of the two shots (1 of 2 runs); either a cut still seen a frame late or the game's own dissolve. Bursts at the cuts with `temporal_aa_debug 11` | `cut3*` runs |
-| T7 | The players' own motion in the vectors (their skinning with last frame's bone constants) for TAA and interpolation without trails |
+| T7 | The players' own motion in the vectors (their skinning with last frame's bone constants): not needed for the match camera (no trails on running players with temporal AA, 1:1 bursts), possibly for close cut-scene shots and frame generation | `tb1`, `wt*` bursts |
 | R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
 
@@ -64,4 +63,5 @@ how it is checked. Done items move to the end with their date.
 | D19 | MetalFX temporal AA no longer soft (T5): contrast-adaptive sharpening after it (`metal_taa_sharpness` 0.6, `patches/fifa/0023`): local contrast 11.2 against 10.4 without temporal AA, 5.2 before | 2026-11-08 |
 | D20 | The SDL audio path measured (A1): no underruns in 8 runs (matches at 60 and uncapped, walk-outs, frame generation on), the underrun warnings of `sdl_audio_driver` silent | 2026-11-08 |
 | D21 | Benchmark baseline (P4), M5 MacBook Air, `bench_mac.sh`, Kick Off, uncapped (`gpu_vblank_display_sync=false`), HUD on: 85.4 FPS (11.7 ms a frame, GPU busy 21.9 ms, CPU waiting 0.2 ms); with temporal AA 85.3 (no measurable cost: matches are bound by the command processor). The benchmark's pad script had a bad line that left it running; the dev pad now skips a failing line | 2026-11-08 |
+| D22 | The launcher's Controls page edits the keyboard layout (I2): a field per pad control (comma-separated SDL key names; an empty field goes back to FIFA's default), written to `fifa19.toml` when editing ends. `FIFA19_LAUNCHER_SNAPSHOT=<file.png>` draws the launcher's window into a file (checked with it) | 2026-11-08 |
 | D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |
