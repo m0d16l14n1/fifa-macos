@@ -72,6 +72,28 @@ def drawn_logo(lines, color):
     return size, size, [bytearray(raw[r * size * 4:(r + 1) * size * 4]) for r in range(size)]
 
 
+def drawn_crest(text, colors):
+    """(w, h, rows) of a crest for a club without a logo: a shield in its colours with its initials (Pillow)."""
+    from PIL import Image, ImageDraw, ImageFont
+    size = 512
+    rgb = [tuple(int(c[i:i + 2], 16) for i in (0, 2, 4)) for c in colors[:2]]
+    if len(rgb) < 2 or rgb[0] == rgb[1]:
+        rgb = rgb[:1] + [(255, 255, 255) if sum(rgb[0]) < 384 else (20, 20, 20)]
+    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    shield = [(64, 40), (448, 40), (448, 260), (256, 480), (64, 260)]
+    d.polygon(shield, fill=rgb[0] + (255,), outline=rgb[1] + (255,), width=26)
+    font = next((p for p in ('/System/Library/Fonts/Supplemental/Arial Bold.ttf', '/System/Library/Fonts/Helvetica.ttc')
+                 if os.path.exists(p)), None)
+    f = ImageFont.truetype(font, 170) if font else ImageFont.load_default()
+    while font and d.textlength(text, font=f) > 330:
+        f = ImageFont.truetype(font, int(f.size * 0.92))
+    w = d.textlength(text, font=f)
+    d.text(((size - w) / 2, 120), text, font=f, fill=rgb[1] + (255,))
+    raw = img.tobytes()
+    return size, size, [bytearray(raw[r * size * 4:(r + 1) * size * 4]) for r in range(size)]
+
+
 def copy_entry(where, target):
     archive, offset, size = where
     os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -156,6 +178,10 @@ def main(argv):
             continue
         url = team.get('logo')
         if not url:
+            if team.get('crest_text'):
+                image = drawn_crest(team['crest_text'], team.get('colors') or ['808080', 'ffffff'])
+                made += crests({'': image, 'dark/': image}, tid)
+                print(f"{tid} {team['name']}: kits from {donor}, crest drawn ({team['crest_text']})")
             continue
         image = fetch_png(url, f"{team['source_id']}.png")
         made += crests({'': image, 'dark/': image}, tid)

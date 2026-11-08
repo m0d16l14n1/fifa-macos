@@ -29,10 +29,12 @@ done
 [ -x "$app/Contents/MacOS/FIFA 19 Launcher" ] || { echo "no launcher in $app" >&2; exit 1; }
 if [ "$support" != "$user" ]; then
   mkdir -p "$support"
-  # The profile, its saves and the shader caches; not fifa19.toml.
+  # The profile, its saves and the shader caches; not fifa19.toml, nor the player's mods (a test's mods come
+  # with --game: the player's would go on over them).
+  rm -rf "$support/Mods" "$support/Modded Game"
   for item in "$user"/*; do
     name=$(basename "$item")
-    [ "$name" = fifa19.toml ] && continue
+    case "$name" in fifa19.toml|Mods|"Modded Game") continue ;; esac
     [ -e "$support/$name" ] || cp -R "$item" "$support/$name"
   done
   # The game's defaults, or the settings file asked for.

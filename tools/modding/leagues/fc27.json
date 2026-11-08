@@ -1,0 +1,43 @@
+{
+  "comment": "FC 27's dump (fc27.py): ratings for every player it matches, and the squads of the game's leagues ESPN hasn't (game league id: the dump's league name).",
+  "today": "2026-11-08",
+  "age_shift_years": 8,
+  "free_agents_team_id": 111592,
+  "squad_leagues": {
+    "2076": "3. Liga",
+    "66": "Ekstraklasa",
+    "65": "SSE Airtricity Men's Premier Division",
+    "83": "K League 1"
+  },
+  "club_ids": {
+    "St. Pats": 423,
+    "Ulsan HD FC": 1473,
+    "Gimcheon Sangmu": 2055
+  },
+  "club_colors": {
+    "Aleman. Aachen": {"name": "Alemannia Aachen", "short": "Aachen", "abbr3": "AAC", "colors": ["ffd700", "000000"]},
+    "SC Verl": {"name": "SC Verl", "short": "Verl", "abbr3": "VER", "colors": ["000000", "ffffff"]},
+    "SV Waldhof": {"name": "SV Waldhof Mannheim", "short": "Waldhof", "abbr3": "SVW", "colors": ["0050a0", "000000"]},
+    "TSV Havelse": {"name": "TSV Havelse", "short": "Havelse", "abbr3": "HAV", "colors": ["0a3d91", "ffffff"]},
+    "Saarbrücken": {"name": "1. FC Saarbrücken", "short": "Saarbrücken", "abbr3": "FCS", "colors": ["002f6c", "000000"]},
+    "Rot-Weiss Essen": {"name": "Rot-Weiss Essen", "short": "RW Essen", "abbr3": "RWE", "colors": ["d00000", "ffffff"]},
+    "Viktoria Köln": {"name": "FC Viktoria Köln", "short": "Viktoria", "abbr3": "VIK", "colors": ["d00000", "ffffff"]},
+    "VfB Stuttgart II": {"name": "VfB Stuttgart II", "short": "Stuttgart II", "abbr3": "VFB", "colors": ["ffffff", "e32219"]},
+    "TSG Hoffenheim II": {"name": "TSG Hoffenheim II", "short": "Hoffenheim II", "abbr3": "TSG", "colors": ["1c63b7", "ffffff"]},
+    "GKS Katowice": {"name": "GKS Katowice", "short": "Katowice", "abbr3": "GKS", "colors": ["00843d", "ffd200"]},
+    "KS Wieczysta Kraków": {"name": "Wieczysta Kraków", "short": "Wieczysta", "abbr3": "WIE", "colors": ["ffd200", "000000"]},
+    "Motor Lublin": {"name": "Motor Lublin", "short": "Motor", "abbr3": "MOT", "colors": ["ffd200", "0050a0"]},
+    "Radomiak Radom": {"name": "Radomiak Radom", "short": "Radomiak", "abbr3": "RAD", "colors": ["00843d", "ffffff"]},
+    "Raków": {"name": "Raków Częstochowa", "short": "Raków", "abbr3": "RCZ", "colors": ["c8102e", "0050a0"]},
+    "Widzew Łódź": {"name": "Widzew Łódź", "short": "Widzew", "abbr3": "WID", "colors": ["c8102e", "ffffff"]},
+    "Drogheda United": {"name": "Drogheda United", "short": "Drogheda", "abbr3": "DRO", "colors": ["7a1f3d", "0b3d91"]},
+    "Galway United": {"name": "Galway United", "short": "Galway", "abbr3": "GAL", "colors": ["7a1f3d", "ffffff"]},
+    "Shelbourne": {"name": "Shelbourne", "short": "Shelbourne", "abbr3": "SHE", "colors": ["c8102e", "ffffff"]},
+    "Bucheon FC 1995": {"name": "Bucheon FC 1995", "short": "Bucheon", "abbr3": "BUC", "colors": ["c8102e", "000000"]},
+    "Daejeon Hana": {"name": "Daejeon Hana Citizen", "short": "Daejeon", "abbr3": "DAE", "colors": ["5b2a86", "00a651"]},
+    "FC Anyang": {"name": "FC Anyang", "short": "Anyang", "abbr3": "ANY", "colors": ["5b2a86", "ffffff"]},
+    "Gimcheon Sangmu": {"name": "Gimcheon Sangmu", "short": "Gimcheon", "abbr3": "GIM"},
+    "Ulsan HD FC": {"name": "Ulsan HD FC", "short": "Ulsan HD", "abbr3": "ULS"},
+    "Gwangju FC": {"name": "Gwangju FC", "short": "Gwangju", "abbr3": "GWA", "colors": ["ffd200", "c8102e"]}
+  }
+}

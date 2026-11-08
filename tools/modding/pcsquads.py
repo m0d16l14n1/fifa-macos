@@ -398,6 +398,8 @@ def build(cfg, csvdir, squadfile, out, strings_path, espn=None):
         b.strings[f'TeamName_Abbr3_{tid}'] = spec['abbr3']
         b.strings[f'CT_TeamName_{tid}'] = spec.get('short', long_name)
         team['teamname'] = long_name
+        # No money to spend: Career's other clubs' players stay out of the Legends (Mahrez to the World XI).
+        team['transferbudget'] = '0'
         for n, k in enumerate([x for x in t['teamkits'] if x['teamtechid'] == club_id]):
             t['teamkits'].append(dict(k, teamtechid=tid, teamkitid=str(next_kit)))
             next_kit += 1

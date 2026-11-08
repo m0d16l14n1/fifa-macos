@@ -1,5 +1,5 @@
 {
-  "comment": "The game's leagues and ESPN's codes for them, for the squads update (MOD3). ESPN has no squads for Poland (66), Ireland (65), Korea (83) or the German 3. Liga (2076): those keep the game's.",
+  "comment": "The game's leagues and ESPN's codes for them, for the squads update (MOD3). ESPN has no squads for Poland (66), Ireland (65), Korea (83) or the German 3. Liga (2076): those come from the FC 27 dump (fc27.json). team_ids: ESPN's clubs whose names don't match the game's (LAFC, Basaksehir, Erzurum BB, Racing Club).",
   "today": "2026-11-08",
   "age_shift_years": 8,
   "first_player_id": 260000,
@@ -9,11 +9,13 @@
     "ger.1": { "122": 31 },
     "ned.1": { "140": 1906 },
     "nor.1": { "5270": 418 },
-    "usa.1": { "190": 689, "186": 696 },
+    "usa.1": { "190": 689, "186": 696, "18966": 112996 },
     "mex.1": { "233": 1881 },
     "bra.1": { "7632": 1035 },
     "col.1": { "4815": 101101 },
-    "jpn.1": { "3384": 101150 }
+    "jpn.1": { "3384": 101150 },
+    "tur.1": { "7914": 101014, "19267": 749 },
+    "arg.1": { "15": 101085 }
   },
   "leagues": {
     "13": "eng.1", "14": "eng.2", "60": "eng.3", "61": "eng.4",

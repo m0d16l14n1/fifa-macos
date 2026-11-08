@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Moves the game's calendar on by YEARS (8: Career starts in July 2026, season 2026/27, not 2018/19).
+
+  calendar_shift.py YEARS CSVDIR [COMPDATADIR [GAMEDIR]]
+
+Every date in the tables moves by YEARS, so everyone stays as old as the steps before made him:
+- the update's players, whose births those steps moved back by age_shift_years (8) so that the game's 2018 made
+  them as old as today, get their real birth dates back;
+- the Legends stay the age they were in the 2010s they stand for; the game's own players and referees no update
+  had stay as the game had them;
+- contracts (a year), the day a player joined his club, the end of a loan move with them.
+COMPDATADIR (the competitions, compdata's text files, changed in place): every competition's first year
+(schedule_year_start: the root's is the year before Career's first season, 2017 in the game) moves by YEARS, so
+the tournaments every four years keep their years (2030's World Cup, as 2022's in 2018); a stadium's year
+(match_stadium_for_year) too. The match days stay as written for 2018 (schedule_year_real: the game moves them to
+the same weekday in the year played).
+GAMEDIR (with COMPDATADIR): Career's own settings, written beside compdata (as the mod's): its calendar's first
+day (cmsettings.ini's CALSTART_YEAR, 2018 in the game: what Career's first day is, not the competitions), and the
+stadiums of the tournaments every four years (internationals.txt: the game's run to 2030 and 2032, so later ones
+repeat them, each after the years its list covers).
+"""
+import datetime
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import league as fifa  # noqa: E402
+
+DATES = {'players': ['birthdate', 'playerjointeamdate'], 'playerloans': ['loandateend'], 'referee': ['birthdate'],
+         'physio': ['birthdate'], 'trainingteamplayers': ['birthdate', 'playerjointeamdate']}
+YEARS = {'players': ['contractvaliduntil'], 'trainingteamplayers': ['contractvaliduntil']}
+COMP_YEARS = ('schedule_year_start', 'match_stadium_for_year')
+
+
+def moved(n, years):
+    return str(fifa.days(fifa.shifted(fifa.from_days(n), -years)))
+
+
+def tables(csvdir, years):
+    changed = []
+    for name in sorted(set(DATES) | set(YEARS)):
+        path = os.path.join(csvdir, name + '.csv')
+        if not os.path.exists(path):
+            continue
+        rows = fifa.read(path)
+        for row in rows:
+            for f in DATES.get(name, []):
+                if row.get(f, '').isdigit() and int(row[f]) > 0:
+                    row[f] = moved(row[f], years)
+            for f in YEARS.get(name, []):
+                if row.get(f, '').isdigit() and int(row[f]) > 1900:
+                    row[f] = str(int(row[f]) + years)
+        if rows:
+            fifa.write(path, rows)
+            changed.append(name)
+    return changed
+
+
+def compdata(folder, years):
+    path = os.path.join(folder, 'settings.txt')
+    with open(path, encoding='utf-8', newline='') as f:
+        lines = f.read().split('\n')
+    n = 0
+    for i, line in enumerate(lines):
+        parts = line.rstrip('\r').split(',')
+        if len(parts) == 3 and parts[1] in COMP_YEARS and parts[2].isdigit() and int(parts[2]) > 1900:
+            parts[2] = str(int(parts[2]) + years)
+            lines[i] = ','.join(parts) + ('\r' if line.endswith('\r') else '')
+            n += 1
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('\n'.join(lines))
+    return n
+
+
+def career(game, data, years):
+    """cmsettings.ini and internationals.txt, from the game, into data (the mod's footballcompeng/data)."""
+    import re
+    import subprocess
+    import modgame
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    unchunk = os.path.join(root, 'out', 'tools', 'unchunk')
+    inside = 'dlc/dlc_footballcompeng/dlc/footballcompeng/data/'
+    out = {}
+    for name in ('cmsettings.ini', 'internationals.txt'):
+        target = os.path.join(data, name)
+        modgame.main(['modgame.py', 'extract', os.path.join(game, 'data1.big'), inside + name, target + '.stored'])
+        subprocess.run([unchunk, target + '.stored', target], check=True, stdout=subprocess.DEVNULL)
+        os.unlink(target + '.stored')
+        out[name] = open(target, 'rb').read()
+    ini, n = re.subn(rb'(CALSTART_YEAR\s*=\s*)(\d+)', lambda m: m.group(1) + str(int(m.group(2)) + years).encode(),
+                     out['cmsettings.ini'])
+    if n != 1:
+        raise SystemExit('cmsettings.ini: no CALSTART_YEAR')
+    open(os.path.join(data, 'cmsettings.ini'), 'wb').write(ini)
+    text = out['internationals.txt']
+    eol = b'\r\n' if b'\r\n' in text else b'\n'
+    lines = text.split(eol)
+    row = re.compile(rb'^(\d+),(\d{4}),(\w+),(\d+)\s*$')
+    rows = [m.groups() for m in map(row.match, lines) if m]
+    extra = []
+    for comp in sorted({r[0] for r in rows}):
+        mine = [r for r in rows if r[0] == comp]
+        first, last = min(int(r[1]) for r in mine), max(int(r[1]) for r in mine)
+        span = last - first + 4  # the years a four-yearly list covers (16 for 2018-2030), repeated after it
+        for step in range(span, 2018 + years + 40 - first + span, span):
+            extra += [(comp, str(int(r[1]) + step).encode(), r[2], r[3]) for r in mine
+                      if last < int(r[1]) + step <= 2018 + years + 40]
+    at = max(i for i, line in enumerate(lines) if row.match(line)) + 1
+    lines[at:at] = [b','.join(r) for r in sorted(extra, key=lambda r: (r[0], int(r[1])))]
+    text = eol.join(lines)
+    open(os.path.join(data, 'internationals.txt'), 'wb').write(text)
+    return len(extra)
+
+
+def main(argv):
+    if len(argv) not in (3, 4, 5):
+        print(__doc__, file=sys.stderr)
+        return 2
+    years = int(argv[1])
+    changed = tables(argv[2], years)
+    msg = f"calendar: {years} years on ({', '.join(changed)})"
+    if len(argv) > 3:
+        msg += f'; {compdata(argv[3], years)} competition years'
+    if len(argv) > 4:
+        msg += f'; Career from {2018 + years}, {career(argv[4], os.path.dirname(argv[3].rstrip("/")), years)} ' \
+               'tournament stadiums more'
+    first = datetime.date(2018 + years, 7, 1)
+    print(msg + f'; Career starts {first:%B %Y}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
