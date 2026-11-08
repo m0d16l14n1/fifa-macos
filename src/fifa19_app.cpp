@@ -92,6 +92,9 @@ static void SetMetalDefaults() {
       {"metal_gpu_fences", "true"},
       // The game draws 1280x720: MetalFX's spatial upscaler is sharper than bilinear on a larger window.
       {"metal_present_upscale", "metalfx"},
+      // MetalFX's spatial upscale of 1280x720 to a large window is soft: sharpened after it at the window's size
+      // (edge energy of the pitch x3 at 0.5 in a 2560x1440 window, no halos).
+      {"metal_present_sharpness", "0.4"},
       // A stall of 2 s leaves every thread's stack in stall-<time>.txt in the working folder.
       {"metal_stall_sample_ms", "2000"},
       // Smooth: the guest vblank on each refresh of the display, so every refresh shows the next game frame (a
