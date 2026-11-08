@@ -1,0 +1,163 @@
+From 947e2b13768962950a49f510673bf5cf68608266 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 14:38:22 +0700
+Subject: [PATCH] Development: draws left out by reason (metal_draw_skip_log);
+ the camera's frustum (temporal_aa_debug 12)
+
+---
+ src/graphics/metal/metal_draw.h  |  3 +++
+ src/graphics/metal/metal_draw.mm | 30 ++++++++++++++++++++++++-----
+ src/graphics/temporal_aa.cpp     | 33 ++++++++++++++++++++++++++++++--
+ 3 files changed, 59 insertions(+), 7 deletions(-)
+
+diff --git a/src/graphics/metal/metal_draw.h b/src/graphics/metal/metal_draw.h
+index 04f0f31..6234cbe 100644
+--- a/src/graphics/metal/metal_draw.h
++++ b/src/graphics/metal/metal_draw.h
+@@ -36,6 +36,9 @@ class MetalDraw {
+   // metal_resolution_scale (render targets and resolves this many times the guest's size across and down).
+   uint32_t resolution_scale() const { return scale_; }
+   bool Draw(Shader* vs, Shader* ps);
++  // metal_draw_skip_log: draws left out before Metal, by reason and vertex shader.
++  void SkipDraw(Shader* vs, const char* why);
++  std::map<std::string, uint64_t> skipped_draws_;
+   bool Resolve();
+   // A guest fence value stored by the GPU, in order after the work encoded so far (metal_gpu_fences);
+   // false: the caller stores it.
+diff --git a/src/graphics/metal/metal_draw.mm b/src/graphics/metal/metal_draw.mm
+index 652b30a..c470fb4 100644
+--- a/src/graphics/metal/metal_draw.mm
++++ b/src/graphics/metal/metal_draw.mm
+@@ -91,6 +91,9 @@ REXCVAR_DEFINE_DOUBLE(metal_taa_sharpness, 0.6, "GPU/Metal",
+     "Contrast-adaptive sharpening after MetalFX's temporal AA, 0 to 1 (MetalFX at the native size is soft: half "
+     "the local contrast of the picture without it); below 0: none")
+     .range(-1.0, 1.0);
++REXCVAR_DEFINE_BOOL(metal_draw_skip_log, false, "GPU/Metal",
++                    "Development: count the draws left out before reaching Metal (no rasterization, tessellated, an "
++                    "empty viewport, nothing written...) by reason and vertex shader, logged every 150 frames");
+ REXCVAR_DEFINE_INT32(metal_resolution_scale, 1, "GPU/Metal",
+                      "Internal resolution: every render target drawn this many times wider and taller than the "
+                      "guest's (2: 1280x720 drawn at 2560x1440), the frame shown at that size. Resolves give later "
+@@ -441,6 +444,12 @@ void MetalDraw::EndFrame() {
+                   transfers_dropped_, textures_unsupported_);
+       transfers_dropped_ = 0; textures_unsupported_ = 0;
+     }
++    if (!skipped_draws_.empty()) {
++      std::string list;
++      for (auto& [what, count] : skipped_draws_) list += fmt::format("; {} x{}", what, count);
++      REXGPU_INFO("Metal draws left out in 150 frames{}", list);
++      skipped_draws_.clear();
++    }
+     if (memexport_skipped_) {
+       REXGPU_WARN("Metal: {} memexport draws skipped in 150 frames (their memory writes are lost)", memexport_skipped_);
+       memexport_skipped_ = 0;
+@@ -880,14 +889,19 @@ void MetalDraw::SpendAsyncBudget(std::chrono::steady_clock::time_point since) {
+   async_budget_us_ = std::max<int64_t>(0, async_budget_us_ - us);
+ }
+ 
++void MetalDraw::SkipDraw(Shader* vs, const char* why) {
++  if (!REXCVAR_GET(metal_draw_skip_log)) return;
++  ++skipped_draws_[fmt::format("{} (VS {:016X})", why, vs->ucode_data_hash())];
++}
++
+ bool MetalDraw::Draw(Shader* vs, Shader* ps) {
+   @autoreleasepool {
+     if (!vs) return true;
+     auto mode = regs_.Get<reg::RB_MODECONTROL>().edram_mode;
+     bool polygonal = draw_util::IsPrimitivePolygonal(regs_);
+-    if (!draw_util::IsRasterizationPotentiallyDone(regs_, polygonal)) return true;
++    if (!draw_util::IsRasterizationPotentiallyDone(regs_, polygonal)) { SkipDraw(vs, "no rasterization"); return true; }
+     uint32_t pitch = regs_.Get<reg::RB_SURFACE_INFO>().surface_pitch;
+-    if (!pitch) return true;
++    if (!pitch) { SkipDraw(vs, "no pitch"); return true; }
+     shaders_.translator().EnsureAnalyzed(*vs);
+     if (mode != xenos::EdramMode::kColorDepth) ps = nullptr;
+     if (ps) { shaders_.translator().EnsureAnalyzed(*ps);
+@@ -901,7 +915,10 @@ bool MetalDraw::Draw(Shader* vs, Shader* ps) {
+     primitives_->NextDraw();
+     PrimitiveProcessor::ProcessingResult primitive{};
+     if (!primitives_->Process(primitive)) { ++failures_; return false; }
+-    if (primitive.IsTessellated() || !primitive.host_draw_vertex_count) return true;
++    if (primitive.IsTessellated() || !primitive.host_draw_vertex_count) {
++      SkipDraw(vs, primitive.IsTessellated() ? "tessellated" : "no vertices");
++      return true;
++    }
+     if (REXCVAR_GET(metal_snapshot_vertices) && !SnapshotDraw(*vs, primitive)) { ++failures_; return false; }
+     if (REXCVAR_GET(metal_draw_cpu_only)) return true;
+     uint64_t vm, pm;
+@@ -947,7 +964,10 @@ bool MetalDraw::Draw(Shader* vs, Shader* ps) {
+                                    dc, false, true, ps && ps->writes_depth(), viewport);
+     draw_util::Scissor scissor{}; draw_util::GetScissor(regs_, scissor);
+     scissor.offset[0] *= ssx; scissor.extent[0] *= ssx; scissor.offset[1] *= ssy; scissor.extent[1] *= ssy;
+-    if (!scissor.extent[0] || !scissor.extent[1] || !viewport.xy_extent[0] || !viewport.xy_extent[1]) return true;
++    if (!scissor.extent[0] || !scissor.extent[1] || !viewport.xy_extent[0] || !viewport.xy_extent[1]) {
++      SkipDraw(vs, "empty scissor or viewport");
++      return true;
++    }
+     float param_gen_scale = 1.0f;
+     if (taa_draw_) taa_draw_(viewport, scissor, param_gen_scale);
+     const uint32_t width = pitch * ssx;
+@@ -977,7 +997,7 @@ bool MetalDraw::Draw(Shader* vs, Shader* ps) {
+       kinds[4] = DepthKind();
+       if (!next[4]) return false;
+     }
+-    if (!mask && !depth) return true;
++    if (!mask && !depth) { SkipDraw(vs, "writes nothing"); return true; }
+     // Texture loads are compute work and cannot run inside a render pass: do them first (a load
+     // needed while a pass is open ends it).
+     // Bind uses what these return (the lookups were made twice a draw). The swizzled signs of the system
+diff --git a/src/graphics/temporal_aa.cpp b/src/graphics/temporal_aa.cpp
+index ca3435d..ce742d3 100644
+--- a/src/graphics/temporal_aa.cpp
++++ b/src/graphics/temporal_aa.cpp
+@@ -75,9 +75,9 @@ REXCVAR_DEFINE_UINT32(temporal_aa_debug, 0, "GPU",
+                       "in place of the gathered colour (a check of the gather), 9 the gathered colour is "
+                       "put in the corner of the scene texture instead of FSR's output, 10 the camera's "
+                       "near and far planes given to FSR the other way round (FSR's inverted-depth "
+-                      "check wants near > far; a picture that differs from 0 means the order matters), 11 a "
++                      "check wants near > far; a picture that differs from 0 means the order matters), 12 the camera as frustum planes in the log, 11 a "
+                       "title profile's camera cut check, every frame")
+-    .range(0, 11)
++    .range(0, 12)
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ REXCVAR_DEFINE_UINT32(temporal_aa_flip_jitter, 0, "GPU",
+                       "Temporal anti-aliasing, development: the jitter FSR is told, x (1) and y (2) "
+@@ -870,6 +870,35 @@ bool CommandProcessor::TaaProfileCheckDraw() {
+   if (!taa_profile_have_vp_ || !TaaInverse(taa_profile_vp_, inverse)) {
+     return false;
+   }
++  if (TaaDebug() == 12) {
++    // Development: the frame's camera as frustum planes (n.x + d >= 0 inside, n unit length; from the row-vector
++    // view-projection: left c3+c0, right c3-c0, bottom c3+c1, top c3-c1, near c2, far c3-c2), every 12th frame.
++    static uint32_t frames = 0;
++    if (frames++ % 12 == 0) {
++      const auto& m = taa_profile_vp_;
++      auto column = [&](int c, double out[4]) { for (int r = 0; r < 4; ++r) out[r] = m[r][c]; };
++      double c0[4], c1[4], c2[4], c3[4];
++      column(0, c0); column(1, c1); column(2, c2); column(3, c3);
++      std::string text;
++      for (int p = 0; p < 6; ++p) {
++        double plane[4];
++        for (int r = 0; r < 4; ++r) {
++          switch (p) {
++            case 0: plane[r] = c3[r] + c0[r]; break;
++            case 1: plane[r] = c3[r] - c0[r]; break;
++            case 2: plane[r] = c3[r] + c1[r]; break;
++            case 3: plane[r] = c3[r] - c1[r]; break;
++            case 4: plane[r] = c2[r]; break;
++            default: plane[r] = c3[r] - c2[r]; break;
++          }
++        }
++        const double length = std::sqrt(plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]);
++        if (length > 0) for (double& v : plane) v /= length;
++        text += fmt::format(" [{:.3f} {:.3f} {:.3f} {:.1f}]", plane[0], plane[1], plane[2], plane[3]);
++      }
++      REXGPU_INFO("Temporal AA camera frustum:{}", text);
++    }
++  }
+   // The scene texture's size: the guest's times the backend's resolution scale.
+   uint32_t host_scale_x = 1, host_scale_y = 1;
+   HdrDrawResolutionScale(host_scale_x, host_scale_y);
+-- 
+2.56.0
+

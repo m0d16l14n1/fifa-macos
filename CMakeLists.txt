@@ -21,6 +21,7 @@ set(FIFA19_SOURCES
     src/dev_pad_ocr.mm
     src/ini_overrides.cpp
     src/guest_log.cpp
+    src/crowd_debug.cpp
 )
 
 add_executable(fifa19 ${FIFA19_SOURCES})
