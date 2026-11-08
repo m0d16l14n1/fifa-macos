@@ -47,6 +47,7 @@ on its own, as a patch in `fifa/`, after it has been tested in FIFA.
 | `0025` presents without vsync | macOS had no UI tick limiter: without display sync the UI thread repainted the same picture ~100 times a second. Now 60 Hz ticks there, and the guest output thread presents each frame itself while no UI drawer has content (`UIDrawer::HasContent`). `metal_taa_debug_stencil` shows the scene's stencil values. |
 | `0026` internal resolution | `metal_resolution_scale` (1-4): render targets N times the guest size; viewports, scissors, clears, EDRAM transfers and resolves scaled, the bookkeeping in guest units; resolves write guest memory at the guest size and a full-size texture for later draws (flagged `textures_resolution_scaled`); shaders translated with the scale; guest output, temporal AA and the front buffer at the scaled size. |
 | `0027` development | `metal_draw_skip_log`: draws left out before Metal, by reason and vertex shader; `temporal_aa_debug=12`: the rendered camera as frustum planes (C7). |
+| `0028` sharpening after the spatial upscale | `metal_present_sharpness`: contrast-adaptive sharpening (CAS weights) of MetalFX's spatial output at the window's size. |
 
 ## Changing the SDK
 

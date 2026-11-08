@@ -1,0 +1,106 @@
+From 383b28b824ff4e992cbe2879da76775ce87ddd66 Mon Sep 17 00:00:00 2001
+From: Nick <nekreshen@yandex.ru>
+Date: Sun, 8 Nov 2026 15:23:50 +0700
+Subject: [PATCH] metal: contrast-adaptive sharpening after MetalFX's spatial
+ upscale (metal_present_sharpness)
+
+The spatial scaler is soft at 2-3x; CAS's weights at the window's size give the detail back without ringing.
+Off by default in the SDK.
+---
+ src/graphics/metal/metal_internal.h   |  4 ++
+ src/graphics/metal/metal_presenter.mm | 57 ++++++++++++++++++++++++++-
+ 2 files changed, 60 insertions(+), 1 deletion(-)
+
+diff --git a/src/graphics/metal/metal_internal.h b/src/graphics/metal/metal_internal.h
+index ee2acf3..ef90c8f 100644
+--- a/src/graphics/metal/metal_internal.h
++++ b/src/graphics/metal/metal_internal.h
+@@ -179,6 +179,10 @@ class MetalPresenter final : public ui::Presenter {
+   std::mutex spatial_mutex_;
+   id<MTLFXSpatialScaler> spatial_scaler_ = nil;
+   id<MTLTexture> spatial_output_ = nil;
++  // metal_present_sharpness: contrast-adaptive sharpening of the spatial scaler's output, at the window's size.
++  id<MTLComputePipelineState> present_sharpen_pipeline_ = nil;
++  id<MTLTexture> sharpen_output_ = nil;
++  bool present_sharpen_failed_ = false;
+   bool spatial_unsupported_logged_ = false;
+   // Frame generation's present thread: the UI thread copies a new frame and the generated one before it into a
+   // slot of fg_copies_ ([0] generated, [1] the new frame) and leaves them to the thread, which waits for drawables
+diff --git a/src/graphics/metal/metal_presenter.mm b/src/graphics/metal/metal_presenter.mm
+index 02cfaa2..569eb17 100644
+--- a/src/graphics/metal/metal_presenter.mm
++++ b/src/graphics/metal/metal_presenter.mm
+@@ -43,6 +43,10 @@ REXCVAR_DEFINE_INT32(metal_present_capture_burst, 0, "GPU/Metal",
+ REXCVAR_DECLARE(std::string, hdr);
+ REXCVAR_DECLARE(bool, vsync);
+ REXCVAR_DECLARE(int32_t, frame_generation_debug);
++REXCVAR_DEFINE_DOUBLE(metal_present_sharpness, 0.0, "GPU/Metal",
++                      "After MetalFX's spatial upscale to the window: contrast-adaptive sharpening (AMD CAS's weights) "
++                      "at the window's size, 0 off to 1 strongest. The spatial scaler is soft at 2-3x")
++    .range(0.0, 1.0);
+ REXCVAR_DEFINE_STRING(metal_present_upscale, "bilinear", "GPU/Metal",
+                       "How the guest's picture is enlarged to the window: bilinear, or metalfx (MetalFX's spatial "
+                       "upscaler, sharper; SDR output only, bilinear under HDR)")
+@@ -780,7 +784,58 @@ id<MTLTexture> MetalPresenter::SpatialUpscale(id<MTLCommandBuffer> command_buffe
+   spatial_scaler_.colorTexture = image;
+   spatial_scaler_.outputTexture = spatial_output_;
+   [spatial_scaler_ encodeToCommandBuffer:command_buffer];
+-  return spatial_output_;
++  const float sharpness = float(REXCVAR_GET(metal_present_sharpness));
++  if (sharpness <= 0.0f || present_sharpen_failed_) return spatial_output_;
++  if (!present_sharpen_pipeline_) {
++    // Each pixel against its four neighbours, limited by the room the local minimum and maximum leave (no ringing).
++    static const char* kSource = R"MSL(
++#include <metal_stdlib>
++using namespace metal;
++kernel void present_sharpen(texture2d<float, access::read> source [[texture(0)]],
++    texture2d<float, access::write> dest [[texture(1)]], constant float& sharpness [[buffer(0)]],
++    uint2 p [[thread_position_in_grid]]) {
++  const uint w = source.get_width(), h = source.get_height();
++  if (p.x >= w || p.y >= h) return;
++  float4 c = source.read(p);
++  float3 n = source.read(uint2(p.x, p.y ? p.y - 1u : 0u)).rgb, s = source.read(uint2(p.x, min(p.y + 1u, h - 1u))).rgb;
++  float3 e = source.read(uint2(min(p.x + 1u, w - 1u), p.y)).rgb, wv = source.read(uint2(p.x ? p.x - 1u : 0u, p.y)).rgb;
++  float3 lo = min(c.rgb, min(min(n, s), min(e, wv))), hi = max(c.rgb, max(max(n, s), max(e, wv)));
++  float3 amount = sqrt(saturate(min(lo, 1.0f - hi) / max(hi, 1.0e-5f)));
++  float3 weight = amount * -mix(0.125f, 0.2f, sharpness);
++  dest.write(float4(saturate((c.rgb + (n + s + e + wv) * weight) / (1.0f + 4.0f * weight)), c.a), p);
++}
++)MSL";
++    NSError* error = nil;
++    id<MTLLibrary> library = [device_ newLibraryWithSource:[NSString stringWithUTF8String:kSource] options:nil
++                                                     error:&error];
++    id<MTLFunction> function = [library newFunctionWithName:@"present_sharpen"];
++    present_sharpen_pipeline_ = function ? [device_ newComputePipelineStateWithFunction:function error:&error] : nil;
++    if (!present_sharpen_pipeline_) {
++      present_sharpen_failed_ = true;
++      REXGPU_WARN("Metal presenter: no sharpening ({})", error ? error.localizedDescription.UTF8String : "?");
++      return spatial_output_;
++    }
++  }
++  if (!sharpen_output_ || sharpen_output_.width != width || sharpen_output_.height != height ||
++      sharpen_output_.pixelFormat != image.pixelFormat) {
++    MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:image.pixelFormat
++                                                                                 width:width
++                                                                                height:height
++                                                                             mipmapped:NO];
++    d.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
++    d.storageMode = MTLStorageModePrivate;
++    sharpen_output_ = [device_ newTextureWithDescriptor:d];
++    sharpen_output_.label = @"rexglue present sharpening";
++  }
++  if (!sharpen_output_) return spatial_output_;
++  id<MTLComputeCommandEncoder> compute = [command_buffer computeCommandEncoder];
++  [compute setComputePipelineState:present_sharpen_pipeline_];
++  [compute setTexture:spatial_output_ atIndex:0];
++  [compute setTexture:sharpen_output_ atIndex:1];
++  [compute setBytes:&sharpness length:sizeof(sharpness) atIndex:0];
++  [compute dispatchThreads:MTLSizeMake(width, height, 1) threadsPerThreadgroup:MTLSizeMake(16, 8, 1)];
++  [compute endEncoding];
++  return sharpen_output_;
+ }
+ 
+ id<MTLCommandBuffer> MetalPresenter::EncodePaint(id<CAMetalDrawable> target, id<MTLTexture> image,
+-- 
+2.56.0
+

@@ -27,6 +27,10 @@ struct Setting: Identifiable {
         Setting(key: "metal_present_upscale", title: "Upscaling to the window",
                 detail: "The picture at the internal resolution, fitted to the window. MetalFX's spatial upscaler is sharper than bilinear.",
                 kind: .choice([("metalfx", "MetalFX spatial"), ("bilinear", "Bilinear")]), defaultValue: .string("metalfx")),
+        Setting(key: "metal_present_sharpness", title: "Sharpening after upscaling",
+                detail: "MetalFX's upscale to a large window is soft: sharpened at the window's size, without halos.",
+                kind: .numberChoice([(0, "Off"), (0.25, "Light"), (0.4, "Medium"), (0.7, "Strong")]),
+                defaultValue: .double(0.4)),
         Setting(key: "metal_resolution_scale", title: "Internal resolution",
                 detail: "What the game is drawn at, before it is fitted to the window. Each step up is sharper and "
                     + "costs the GPU about that many times more: QHD wants an M-series Pro or better for 60 FPS, 4K a "
