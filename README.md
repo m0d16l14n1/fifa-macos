@@ -26,6 +26,7 @@ details. The first run shows the EA User Agreement and asks for a club; both are
 | [docs/BUILDING.md](docs/BUILDING.md) | building, what is where, cleaning |
 | [docs/METAL.md](docs/METAL.md) | the Metal backend, FIFA's changes to it, MetalFX and Metal 4 status |
 | [docs/DEBUGGING.md](docs/DEBUGGING.md) | test runs, the dev pad, screenshots, logs, stall reports, reverse engineering |
+| [docs/MODDING.md](docs/MODDING.md) | mods: the database as CSV, new and replaced files, the launcher's Mods page |
 | [docs/PLAN.md](docs/PLAN.md) | milestones from here to a release |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | known issues and work items |
 | [patches/README.md](patches/README.md) | the SDK's patches |

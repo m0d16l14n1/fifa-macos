@@ -14,6 +14,11 @@ struct Paths {
     var program: URL { programFolder.appendingPathComponent("fifa19") }
     var config: URL { support.appendingPathComponent("fifa19.toml") }
     var log: URL { logs.appendingPathComponent("fifa19.log") }
+    /// Mods: each a folder of files laid out like the disc (data/db/fifa_ng_db.db...), see docs/MODDING.md.
+    var mods: URL { support.appendingPathComponent("Mods") }
+    /// The game with the mods on: links to the game's files and the mods' (tools/modding/modgame.py).
+    var moddedGame: URL { support.appendingPathComponent("Modded Game") }
+    var modBuilder: URL? { Bundle.main.url(forResource: "modgame", withExtension: "py") }
     /// The Games on Demand extractor the app carries (scripts/extract_god.py).
     var extractor: URL? { Bundle.main.url(forResource: "extract_god", withExtension: "py") }
 
@@ -58,6 +63,51 @@ final class Game: ObservableObject {
         didSet { UserDefaults.standard.set(gameFolder, forKey: "gameFolder") }
     }
 
+    /// Mods turned off in the Mods page (by folder name); a mod put in the Mods folder is on.
+    @Published var disabledMods = Set(UserDefaults.standard.stringArray(forKey: "disabledMods") ?? []) {
+        didSet { UserDefaults.standard.set(Array(disabledMods).sorted(), forKey: "disabledMods") }
+    }
+    @Published var modStatus = ""
+
+    /// The mods' folders, in the order they go on (a later one wins where two change the same file).
+    func modFolders() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.mods.path)) ?? []
+        return names.filter { name in
+            var folder: ObjCBool = false
+            return !name.hasPrefix(".")
+                && FileManager.default.fileExists(atPath: paths.mods.appendingPathComponent(name).path, isDirectory: &folder)
+                && folder.boolValue
+        }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// The game folder to run: the game itself, or the modded game when mods are on (built afresh each time:
+    /// it is only links, a second or so). nil when the mods could not be put on (modStatus says why).
+    func gameRoot(_ base: String) -> String? {
+        let mods = modFolders().filter { !disabledMods.contains($0) }
+        guard !mods.isEmpty else { modStatus = ""; return base }
+        guard let builder = paths.modBuilder else { modStatus = "This app has no mod builder."; return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-I", builder.path, "build", "--game", base, "--out", paths.moddedGame.path]
+            + mods.map { paths.mods.appendingPathComponent($0).path }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do { try process.run() } catch {
+            modStatus = "Could not start python3: \(error.localizedDescription)"
+            return nil
+        }
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        let lines = text.split(separator: "\n")
+        modStatus = (lines.last.map(String.init) ?? "").replacingOccurrences(of: paths.moddedGame.path + ": ", with: "")
+        guard process.terminationStatus == 0 else {
+            modStatus = "The mods could not be put on: " + text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return nil
+        }
+        return paths.moddedGame.path
+    }
+
     init() {
         try? FileManager.default.createDirectory(at: paths.support, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: paths.logs, withIntermediateDirectories: true)
@@ -89,7 +139,7 @@ final class Game: ObservableObject {
     var programInstalled: Bool { FileManager.default.isExecutableFile(atPath: paths.program.path) }
 
     /// Tests: FIFA19_LAUNCHER_ARGS adds options (after the Extra options), FIFA19_LAUNCHER_BACKGROUND=1 keeps the
-    /// game's window in the background, and with FIFA19_LAUNCHER_PLAY=1 the launcher quits when the game does.
+    /// game's window in the background, FIFA19_GAME runs the game from another folder, and with FIFA19_LAUNCHER_PLAY=1 the launcher quits when the game does.
     static let testEnv = ProcessInfo.processInfo.environment
 
     func play(extra: [String] = []) {
@@ -98,7 +148,16 @@ final class Game: ObservableObject {
         process.executableURL = paths.program
         process.currentDirectoryURL = paths.logs  // stall reports land next to the log
         var arguments = ["--log_file=\(paths.log.path)"]
-        if gameInstalled { arguments.append("--game_data_root=\(gameFolder)") }
+        // Tests may run another copy of the game (FIFA19_GAME: a folder of links with a changed file or two).
+        let testGame = Game.testEnv["FIFA19_GAME"] ?? ""
+        if !testGame.isEmpty || gameInstalled {
+            guard let root = gameRoot(testGame.isEmpty ? gameFolder : testGame) else {
+                lastExit = modStatus
+                if Game.testEnv["FIFA19_LAUNCHER_PLAY"] == "1" { exit(1) }
+                return
+            }
+            arguments.append("--game_data_root=\(root)")
+        }
         arguments += extraArguments.split(separator: " ").map(String.init)
         arguments += (Game.testEnv["FIFA19_LAUNCHER_ARGS"] ?? "").split(separator: " ").map(String.init)
         arguments += extra

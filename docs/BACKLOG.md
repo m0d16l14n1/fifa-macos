@@ -45,6 +45,16 @@ how it is checked. Done items move to the end with their date.
 | T9 | Crowd and the pitch's edge blurry or ghosting with temporal AA (player, 2026-11-08): the crowd's cards animate where the motion vectors only carry the camera. A reactive mask for the crowd's draws (VS 4136505A) to MetalFX | user report | crowd as sharp with temporal AA as without |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
 
+## Modding ([MODDING.md](MODDING.md))
+
+| # | Item | Check |
+|---|---|---|
+| MOD1 | A new league added beside the others: rows in `leagues`, `leagueteamlinks`, teams, players and links; the competition files in `dlc/dlc_footballcompeng/.../compdata` (compobj, settings, schedule, advancement, initteams, standings); its names in the locale database. Start with a league of existing ids reused, then new ids | the league in Kick Off's league list and a Career season of it |
+| MOD2 | RX3 (kits, faces, heads, boots, crests): read and write the Xbox 360 RX3 (big-endian; Rx3Tools is the PC reference), textures to PNG and back (DXT1/5, Xbox tiling) | a kit recoloured in a quick match |
+| MOD3 | Squads, ratings, transfers and new players from SoFIFA (soccerdata's SoFIFA reader): map its players and teams to the database's ids, ratings to `players`, clubs to `teamplayerlinks`, new players with new ids and generic heads. Needs the player's go-ahead before anything is downloaded | a current squad in a quick match |
+| MOD4 | Names and strings: the locale database (`data/loc/eng_us.db` in `locale.big`, no index, so not replaceable as a loose file) has the update file the game looks for, `data/loc/eng_us_upd.db`: find its format (the same t3db?) and whether its strings win over the base ones | a renamed team in the menus |
+| MOD5 | The archives' index hash (`dataN.bh`, 8 bytes a name): not needed while removed entries do (loose files), but would let mods be packed into archives | |
+
 ## Done
 
 | # | Item | Date |
