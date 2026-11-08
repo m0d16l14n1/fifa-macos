@@ -12,14 +12,15 @@ Unpack the two files from data0.big first (tools/modding/modgame.py extract, the
 Format (big-endian on the Xbox 360), worked out from the game's own files:
   file:   "DB\\0\\x08" u8[4] (01 00 00 00), u32 file size, u32 0, u32 table count, u32 crc of bytes 0-20,
           table count x {char[4] short name, u32 offset from the end of the index}, u32 crc of the index
-  table:  u32 2, u32 record bytes, u32 record bits, u32 compressed string bytes, u16 records, u16 records,
+  table:  u32 flags (2; 0x20 plain strings, 0x40 Huffman-coded strings), u32 record bytes, u32 record bits, u32 compressed string bytes, u16 records, u16 records,
           u32 0x0000ffff, u8 fields, u8[7], u32 crc of the 32 bytes before it,
           fields x {u32 type (0 string, 3 integer, 4 float...), u32 bit offset, char[4] short name, u32 bits},
           records x record bytes (bit fields MSB first; an integer is stored as value - rangelow from the meta),
-          the string block (compressed string bytes: for type-13 fields, whose record holds a 32-bit offset into
-          it or ffffffff, each string a length byte and its text; or, in the big name tables, Huffman-coded:
+          the string block (compressed string bytes: for type-13 and type-14 (long) fields, whose record holds a
+          32-bit offset into it or ffffffff, each string a length byte (2 for type 14) and its text; or, flag
+          0x40 (the big name tables, the locale's text), Huffman-coded:
           the block starts with the tree, nodes of two 2-byte children (NN 00 an inner node, 00 cc a leaf byte,
-          node 0 the root, bit 0 the first child), each string a length byte (in UTF-8 bytes) and its code,
+          node 0 the root, bit 0 the first child), each string its length (in UTF-8 bytes) and its code,
           MSB first, from a whole byte), zero padding to 4 bytes, and a u32 crc of everything from the field
           list to it
   crc:    CRC-32 without reflection, polynomial 04C11DB7, initial ffffffff, no final xor (CRC-32/MPEG-2)
@@ -58,6 +59,10 @@ def read_meta(path):
     return tables
 
 
+# Fields whose record holds a 32-bit offset into the string block: 13 a string, 14 a long one (the locale's text).
+STRING_TYPES = (13, 14)
+
+
 class Table:
     def __init__(self, short, blob):
         self.short = short
@@ -75,16 +80,17 @@ class Table:
         self.data_start = p
         self.data_end = p + self.record_bytes * self.records2
         self.strings = blob[self.data_end:self.data_end + self.string_bytes]
-        # Huffman-coded strings (the tree first, so no string at offset 0) or plain ones.
-        offsets = []
+        # The header's first word is flags: 0x40 Huffman-coded strings (the tree first), 0x20 plain ones.
+        self.huffman = bool(self.version & 0x40)
+        offsets = [0]
         for short, ftype, offset, _ in self.fields:
-            if ftype == 13:
-                for r in range(min(self.records, 64)):
+            if ftype in STRING_TYPES:
+                for r in range(self.records):
                     rec = blob[self.data_start + r * self.record_bytes:self.data_start + (r + 1) * self.record_bytes]
                     v = (int.from_bytes(rec, 'big') >> (len(rec) * 8 - offset - 32)) & 0xFFFFFFFF
                     if v != 0xFFFFFFFF:
                         offsets.append(v)
-        self.huffman = bool(offsets) and min(offsets) > 0 and self.strings[1:2] == b'\0'
+        offsets = [o for o in offsets if o] or [len(self.strings)]
         self.tree = huffman_tree(self.strings, min(offsets)) if self.huffman else None
 
     def rows(self):
@@ -93,15 +99,16 @@ class Table:
             rec = self.blob[self.data_start + r * self.record_bytes:self.data_start + (r + 1) * self.record_bytes]
             row = decode_record(rec, self.fields)
             for short, ftype, _, _ in self.fields:
-                if ftype == 13:
+                if ftype in STRING_TYPES:
                     off = row[short]
                     if off == 0xFFFFFFFF or off >= len(self.strings):
                         row[short] = ''
                     elif self.huffman:
-                        row[short] = huffman_decode(self.strings, off, self.tree).decode('utf-8', 'replace')
+                        row[short] = huffman_decode(self.strings, off, self.tree, ftype == 14).decode('utf-8', 'replace')
                     else:
-                        n = self.strings[off]
-                        row[short] = self.strings[off + 1:off + 1 + n].decode('utf-8', 'replace')
+                        size = 2 if ftype == 14 else 1
+                        n = int.from_bytes(self.strings[off:off + size], 'big')
+                        row[short] = self.strings[off + size:off + size + n].decode('utf-8', 'replace')
             out.append(row)
         return out
 
@@ -118,9 +125,10 @@ def huffman_tree(block, tree_bytes):
     return nodes
 
 
-def huffman_decode(block, offset, tree):
-    n = block[offset]
-    p, bit, node, out = offset + 1, 0, 0, bytearray()
+def huffman_decode(block, offset, tree, long=False):
+    """A string's bytes: its length (1 byte, or 2 for a type-14 field), then its code."""
+    n = int.from_bytes(block[offset:offset + 2], 'big') if long else block[offset]
+    p, bit, node, out = offset + (2 if long else 1), 0, 0, bytearray()
     while len(out) < n and p < len(block):
         b = (block[p] >> (7 - bit)) & 1
         bit += 1
@@ -180,10 +188,14 @@ def huffman_build(strings):
     return bytes(tree), codes
 
 
-def huffman_encode(raw, codes):
+def length_prefix(raw, long):
+    return len(raw).to_bytes(2 if long else 1, 'big')
+
+
+def huffman_encode(raw, codes, long=False):
     bits = ''.join(codes[x] for x in raw)
     bits += '0' * (-len(bits) % 8)
-    return bytes([len(raw)]) + bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
+    return length_prefix(raw, long) + bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
 
 
 def get_bits(rec, offset, bits):
@@ -200,7 +212,7 @@ def decode_record(rec, fields):
         if ftype == 0:  # fixed-length string
             raw = rec[offset // 8:offset // 8 + bits // 8]
             values[short] = raw.split(b'\0')[0].decode('utf-8', 'replace')
-        elif ftype == 13:  # an offset into the string block
+        elif ftype in STRING_TYPES:  # an offset into the string block
             values[short] = (big >> (total - offset - 32)) & 0xFFFFFFFF
         elif ftype == 4 and bits == 32:  # float
             values[short] = struct.unpack('>f', ((big >> (total - offset - 32)) & 0xFFFFFFFF).to_bytes(4, 'big'))[0]
@@ -215,7 +227,7 @@ def encode_record(values, fields, record_bytes, template=None):
     strings = []
     for short, ftype, offset, bits in fields:
         v = values[short]
-        if ftype == 13:
+        if ftype in STRING_TYPES:
             bits = 32
         if ftype == 0:
             strings.append((offset // 8, bits // 8, str(v).encode('utf-8')[:bits // 8 - 1]))
@@ -248,6 +260,10 @@ def read_db(path):
     return d[:16], tables
 
 
+def max_length(ftype):
+    return 65535 if ftype == 14 else 255
+
+
 def build_table(t, rows=None):
     """The table's bytes, with new rows (dicts by field short name) or its own."""
     if rows is None:
@@ -260,23 +276,25 @@ def build_table(t, rows=None):
         out = bytearray()
         codes = None
         if t.huffman:
-            texts = [str(v[short]).encode('utf-8')[:255] for v in rows for short, ftype, _, _ in t.fields
-                     if ftype == 13 and str(v[short])]
+            texts = [str(v[short]).encode('utf-8')[:max_length(ftype)] for v in rows
+                     for short, ftype, _, _ in t.fields if ftype in STRING_TYPES and str(v[short])]
             tree, codes = huffman_build(texts)
             strings += tree
         for values in rows:
             values = dict(values)
             for short, ftype, _, _ in t.fields:
-                if ftype == 13:
+                if ftype in STRING_TYPES:
                     text = str(values[short])
                     if not text:
                         values[short] = 0xFFFFFFFF
                         continue
-                    if text not in placed:
-                        raw = text.encode('utf-8')[:255]
-                        placed[text] = len(strings)
-                        strings += huffman_encode(raw, codes) if codes is not None else bytes([len(raw)]) + raw
-                    values[short] = placed[text]
+                    key = (ftype == 14, text)
+                    if key not in placed:
+                        raw = text.encode('utf-8')[:max_length(ftype)]
+                        placed[key] = len(strings)
+                        strings += (huffman_encode(raw, codes, ftype == 14) if codes is not None
+                                    else length_prefix(raw, ftype == 14) + raw)
+                    values[short] = placed[key]
             out += encode_record(values, t.fields, t.record_bytes)
         data, strings = bytes(out), bytes(strings)
         n = n_valid = len(rows)
@@ -308,6 +326,68 @@ def write_db(path, head16, tables, blobs):
     out = bytes(header) + bytes(index) + struct.pack('>I', crc(bytes(index))) + bytes(body)
     open(path, 'wb').write(out)
     return out
+
+
+
+# The locale's strings (data/loc/<lang>.db, one table, LanguageStrings): looked up by the hash of their id. The
+# game reads data/loc/<lang>_upd.db (with <lang>_upd-meta.xml, whose database must be named <lang>_upd) beside
+# its own when it is there, and takes a string from it first: an update needs only the strings it changes.
+_CRC_TABLE = []
+for _i in range(256):
+    _c = _i
+    for _ in range(8):
+        _c = (_c >> 1) ^ 0xEDB88320 if _c & 1 else _c >> 1
+    _CRC_TABLE.append(_c)
+
+
+def string_hash(stringid):
+    """A string id's hash (the record's raw hashid): CRC-32's table, each byte with bit 5 cleared (so letters
+    are upper case), from 0 and without the final inversion (the game's sub_826191D8)."""
+    h = 0
+    for c in stringid.encode('utf-8'):
+        h = _CRC_TABLE[((c & 0xDF) ^ h) & 0xFF] ^ (h >> 8)
+    return h
+
+
+LANGUAGE_META = '''\ufeff<?xml version="1.0" encoding="utf-8"?>
+<!--This is the meta XML file for a t3db database.-->
+<database name="{name}" shortname="u_up" writename="{name}_write" writeshortname="etup" version="6">
+  <parameters />
+  <indices>
+    <index shortname="ppiA" tableshortname="GJCv">
+      <indexfields>
+        <indexfield shortname="jKhj" sortdirection="0" />
+      </indexfields>
+    </index>
+  </indices>
+  <table name="LanguageStrings" shortname="GJCv" difflistproperty="ENABLED">
+    <fields>
+      <field name="hashid" shortname="jKhj" type="DBOFIELDTYPE_INTEGER" depth="32" null="False" rangehigh="2147483647" rangelow="-2147483648" key="True" />
+      <field name="stringid" shortname="VhAs" type="DBOFIELDTYPE_STRING" depth="800" null="False" rangehigh="0" rangelow="0" />
+      <field name="sourcetext" shortname="bYbZ" type="DBOFIELDTYPE_STRING" depth="32000" null="False" rangehigh="0" rangelow="0" />
+    </fields>
+  </table>
+</database>
+'''
+
+
+def language_db(path, strings):
+    """Writes a locale database of these strings ({id: text}) as the game's own are made (Huffman-coded, the
+    records in hash order for the index)."""
+    head = struct.pack('>IIIIHHIB', 0x42, 16, 127, 0, 0, 0, 0xFFFF, 3) + bytes(7)
+    head += struct.pack('>I', crc(head))
+    fields = b''.join(struct.pack('>II4sI', ftype, offset, short.encode('latin1'), bits)
+                      for short, ftype, offset, bits in (('VhAs', 13, 0, 800), ('bYbZ', 14, 32, 32000),
+                                                          ('jKhj', 3, 64, 32)))
+    table = Table('GJCv', head + fields)
+    rows = [{'VhAs': i, 'bYbZ': text, 'jKhj': string_hash(i)} for i, text in strings.items()]
+    rows.sort(key=lambda r: r['jKhj'])
+    write_db(path, b'DB\0\x08\x01\0\0\0', [table], [build_table(table, rows)])
+
+
+def language_meta(path, name):
+    with open(path, 'w', encoding='utf-8', newline='\r\n') as f:
+        f.write(LANGUAGE_META.format(name=name))
 
 
 def main(argv):
@@ -353,7 +433,7 @@ def main(argv):
                     for col, (s, low) in by_name.items():
                         ftype = next(ft for fs, ft, _, _ in t.fields if fs == s)
                         v = r[col]
-                        values[s] = v if ftype in (0, 13) else (float(v) if ftype == 4 else int(v) - low)
+                        values[s] = v if ftype == 0 or ftype in STRING_TYPES else (float(v) if ftype == 4 else int(v) - low)
                     rows.append(values)
             blobs.append(build_table(t, rows))
             print(f'{tname}: {len(rows)} records (was {t.records})')

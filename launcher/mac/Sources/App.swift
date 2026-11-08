@@ -270,7 +270,8 @@ struct ModsPage: View {
             Text("Mods").font(.largeTitle.bold())
             Text("A mod is a folder of the game's files, laid out as on the disc (data/db/fifa_ng_db.db, "
                  + "data/sceneassets/kit/...). A file the game has is replaced, a new one added; your game "
-                 + "files stay as they are. Mods go on in name order: where two change the same file, the later wins.")
+                 + "files stay as they are. Names and other text go in strings/eng_us.csv (stringid,text). Mods go on in "
+                 + "name order: where two change the same file or string, the later wins.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

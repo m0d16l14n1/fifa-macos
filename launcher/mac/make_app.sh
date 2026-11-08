@@ -23,7 +23,7 @@ for lib in "$sdk_lib"/librexgpu-*.dylib; do [ -e "$lib" ] && cp -fL "$lib" "$mac
 # The Vulkan loader and MoltenVK, for --fifa19_gpu_backend=vulkan (the build keeps them in vulkan/).
 [ -d "$build/vulkan" ] && rm -rf "$macos/vulkan" && cp -RL "$build/vulkan" "$macos/vulkan"
 cp -f "$root/scripts/extract_god.py" "$resources/extract_god.py"
-cp -f "$root/tools/modding/modgame.py" "$resources/modgame.py"
+cp -f "$root/tools/modding/modgame.py" "$root/tools/modding/fifadb.py" "$resources/"
 sh "$root/launcher/mac/build.sh" "$macos/FIFA 19 Launcher"
 
 version=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo dev)
