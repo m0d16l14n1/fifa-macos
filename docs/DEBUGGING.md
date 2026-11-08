@@ -2,6 +2,34 @@
 
 ## Running for tests
 
+Test runs go through the installed app, as a player starts it: install it after a build
+(`sh launcher/mac/make_app.sh "/Applications/FIFA 19.app"`), then `sh scripts/run_app.sh <game options>` starts
+the game through its launcher with the window in the background and the audio muted (`--sound` keeps it), and
+waits until the game quits. The launcher passes `FIFA19_LAUNCHER_ARGS` to the game and quits with it
+(`FIFA19_LAUNCHER_PLAY=1`, `FIFA19_LAUNCHER_BACKGROUND=1`). The log is `~/Library/Logs/FIFA 19/fifa19.log`.
+
+### Quick matches: any stadium, time of day and weather in a minute
+
+FIFA has EA's own test switches compiled in: ini keys the engine reads through one getter (`sub_8242ADF8`), which
+`src/ini_overrides.cpp` answers from `fifa19_ini=KEY=VALUE,...`. `fifa19_quick_match=true` sets the ones for EA's
+auto match: no intro movies or menus (`SKIP_BOOTFLOW=1`, `BOOT_TO_MENU=0`), the practice arena's idle timer
+starts `FREE_ROAM_AUTOMATCH` a second later, and the match (the CPU against the CPU, walk-out and all) is on about
+a minute after start. Its settings:
+
+| Option | Key | Values |
+|---|---|---|
+| `fifa19_match_stadium` | `FREE_ROAM_AUTOMATCH/STADIUM_ID` | the stadium's id (1 Old Trafford; the ids are those of `data/ui/imgassets/stadiumsbig/stadium_<id>_<lighting>.dds`); -1 the game picks |
+| `fifa19_match_time` | `FREE_ROAM_AUTOMATCH/STADIUM_TOD` | the lighting: 0 day, 1, 3, 4 (below); -1 the stadium's own |
+| `fifa19_match_weather` | `FREE_ROAM_AUTOMATCH/WEATHER_TYPE` | 0 clear, 1 overcast, 2 rain, 3 snow |
+| `fifa19_match_half_length` | `FREE_ROAM_AUTOMATCH/HALF_LENGTH` | minutes |
+| `fifa19_match_home_team`, `_away_team` | `FREE_ROAM_AUTOMATCH/HOME_TEAM_ID`, `AWAY_TEAM_ID` | team ids; -1 random |
+
+The launcher's Quick Match page sets them and starts one. `sh scripts/conditions.sh 1:3:2 1:0:0` plays one per
+STADIUM:TIME:WEATHER and keeps shots, a burst of consecutive frames and the present log's summary of each in
+`out/conditions/`. `fifa19_ini_log=true` logs every ini key the game reads with its value (about 500 at boot:
+`DISABLE_FRAMERATE`, `FORCE_RENDER_30`, `MSAA_MODE`, `CROWD/...`); `fifa19_guest_log=<text>|<text>` logs the
+game's own debug labels (EA's print, `sub_826A1EB0`, empty in the retail build; `*` for all).
+
 Test runs never take the screen: `FIFA19_BACKGROUND=1 sh scripts/play_mac.sh` starts the game windowed, without
 focus or a Dock icon (SDL's background-app mode; the window is ordered in without being activated). The Metal
 performance HUD is on in every run (`FIFA19_METAL_HUD=0` turns it off).
@@ -34,6 +62,12 @@ A scripted controller merged with the real ones, for unattended runs:
 Commands: `press`, `hold`, `down`, `up` (buttons `a b x y lb rb back start ls rs up down left right`), `trigger
 lt|rt <0..1> [duration]`, `stick lx|ly|rx|ry <-1..1> [duration]`, `release`, `wait`, `log <text>`, `set <cvar>
 <value>`, `shot <name>`, `burst <name> <count>` (consecutive frames), `quit`.
+
+Reading the screen (macOS Vision on the presented frame): `ocr` logs each line of text with its place and the
+colour behind it, `waitfor <timeout> <text>`, `expect <text>`, `select <button> <max> <text>` (presses until the
+item is highlighted), `choose <max> <row> = <value>` (presses right until the row shows the value), `ifscreen <text>
+: <command>`. Guest memory: `dump <address> <size> <name>` (hex; the image is `dump 82000000 1CA0000 image`, whose
+strings list the ini keys), `peek <address> [size]`, `poke <address> <bytes>`.
 
 ## Screenshots
 

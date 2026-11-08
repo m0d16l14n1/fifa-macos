@@ -43,6 +43,7 @@ on its own, as a patch in `fifa/`, after it has been tested in FIFA.
 | `0021` temporal AA title profile | `temporal_aa_anchor_ps`, `temporal_aa_camera`: temporal AA for a title without guest markers. The scene is the MSAA 2x draws (jittered, predicated tiles included), the camera the view-projection in named vertex shaders' constants (last frame's kept), the pass runs before the anchor pixel shader with the frame's last depth resolve; Metal takes the depth map from the viewport and the scene's own colour format; `metal_taa_debug_vectors` shows the vectors. |
 | `0022` frame generation without guest markers | `guest_marker_rules` (a title's tone map and UI by pixel shader), several temporal anchors, the camera from the scene's last matching draw, camera cuts from the cameras (`temporal_aa_debug 11` logs them), UI drawers with nothing to show (the achievement notifier between toasts) no longer hold generated frames back, and the Metal presenter generates frames only when they can be shown. |
 | `0023` sharpening after temporal AA | `metal_taa_sharpness`: contrast-adaptive sharpening (AMD CAS's weights) of MetalFX's temporal output, which is soft at the native size. |
+| `0024` vsync off presents at once | With `vsync=false` the CAMetalLayer's display sync is off as well: frames go to the screen when drawn (tearing), so the HUD shows the game's own frame rate. |
 
 ## Changing the SDK
 

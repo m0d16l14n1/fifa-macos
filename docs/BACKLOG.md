@@ -8,7 +8,9 @@ how it is checked. Done items move to the end with their date.
 | # | Item | Seen | Check |
 |---|---|---|---|
 | C2 | Every mode toured with shots: Kick Off is mapped; the main menu's Home and Play tabs and Skill Games' arena player select are right (2026-11-08, live through `--fifa19_pad_pipe`); Career, Ultimate Team (CardsDLLzf), Tournaments, the skill games themselves, Women's, Champions League not yet | | shots per mode, compared |
-| C3 | Stadium × time of day × weather matrix (`scripts/pad/match.sh`): shadows, rain, snow, night lighting | | a shot per combination |
+| C3 | Stadium × time of day × weather matrix, now a quick match each (`scripts/conditions.sh`, EA's auto match booted straight into): shadows, rain, snow, night lighting. The player saw many flickers in rainy night matches (2026-11-08) | user report | a shot and a burst per combination, no frame differing from both neighbours |
+| C8 | Loading screens: now and then a black 512x512 square over the title screen's picture (guest x 512-1024, y 0-512: one tile of the background missing) | user screenshot, 2026-11-08 | not seen in a dozen boots |
+| C9 | Quick match: with random teams the line-up card lists every player under one name (the auto match's random squads); fixed team ids show real squads | quick match runs | |
 | C5 | `Presenter: UI overlay painting isn't available with this graphics backend` at start: the presenter's separate UI layer (for frame generation) has no Metal implementation; the F3/F4 overlays still draw over the picture. Needed for T5 | every boot log | F3/F4 visible in a shot; the line gone once T5 lands |
 | C6 | `gamecontrollerdb.txt` missing: SDL's built-in mappings are used; ship the community database for unusual pads | every boot log | a third-party pad maps right |
 | C7 | In some close cut-scene shots the stands are empty while a wide shot of the same stands is full (walk-out, 16 s in: `out/logs/walkout.txt` shot walk-c): the crowd's draws (VS 4136505AB17879F1, texture 1A71D000) are not submitted at all in that frame, the same in builds before 2026-11-08. Not occlusion queries or viz queries (none used). Find the crowd's culling in the game (who decides the crowd's draw list) | `crowdd` run, frame dumps of walk-c and walk-e | the crowd in every shot as on the console |
@@ -28,6 +30,7 @@ how it is checked. Done items move to the end with their date.
 
 | # | Item | Check |
 |---|---|---|
+| A3 | Sound now and then laggy, off-pitch or chopping in the player's matches (2026-11-08, with vsync off and display sync off: unpaced frames). Count underruns in those settings and at the defaults (`sdl_audio_driver` warnings) | underrun counts per setting |
 | A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback. Only for latency now: the SDL path has no underruns (A1, D20) | lower latency, still no underruns |
 | I1 | Controller hot-plug goes to pad one; DualSense/DualShock prompts where possible; rumble | plug/unplug mid-match |
 
@@ -37,7 +40,8 @@ how it is checked. Done items move to the end with their date.
 |---|---|
 | T8 | Frame generation: at some walk-out cuts one presented frame is a blend of the two shots (1 of 2 runs); either a cut still seen a frame late or the game's own dissolve. Bursts at the cuts with `temporal_aa_debug 11` | `cut3*` runs |
 | T7 | The players' own motion in the vectors (their skinning with last frame's bone constants): not needed for the match camera (no trails on running players with temporal AA, 1:1 bursts), possibly for close cut-scene shots and frame generation | `tb1`, `wt*` bursts |
-| R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work |
+| R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work. The player finds the picture blurry on a 4K window: temporal AA runs at 1280x720 and the presenter upscales spatially, so detail is capped by this |
+| T9 | Crowd and the pitch's edge blurry or ghosting with temporal AA (player, 2026-11-08): the crowd's cards animate where the motion vectors only carry the camera. A reactive mask for the crowd's draws (VS 4136505A) to MetalFX | user report | crowd as sharp with temporal AA as without |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
 
 ## Done

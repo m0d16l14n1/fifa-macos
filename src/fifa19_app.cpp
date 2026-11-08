@@ -34,6 +34,16 @@ REXCVAR_DEFINE_BOOL(fifa19_temporal_aa, true, "FIFA19",
                     "processor); running players show no trails at the match camera. Restart")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+// How the 16:9 picture meets a window of another shape (a Mac's 16:10 screen): "fit" shows all of it with black
+// bars; "fill" crops up to 5% of each edge instead (the console's title-safe area, where FIFA keeps its HUD: the
+// match clock starts 6.4% in), so a 16:10 window keeps thin bars (1.5% at top and bottom) and a slightly less tall
+// one none; "stretch" fills it unevenly.
+REXCVAR_DEFINE_STRING(fifa19_screen_fit, "fill", "FIFA19",
+                      "The 16:9 picture in another shape of window: fit (black bars), fill (crops the edges, at "
+                      "most 5% each) or stretch")
+    .allowed({"fit", "fill", "stretch"})
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // The keyboard plays as pad one (merged with any real pad), laid out like FIFA's keyboard-only Classic controls on
 // PC: arrows move, W/A/S/D are through ball / lob / pass / shoot. These are defaults: the config file, the command
 // line and the settings overlay (F4) still change them. README.md lists them all.
@@ -222,6 +232,11 @@ void Fifa19App::OnPostSetup() {
   if (REXCVAR_GET(fifa19_temporal_aa) || rex::cvar::GetFlagByName("frame_generation") != "off") {
     rex::cvar::SetFlagByName("temporal_aa", "fsr");
   }
+  const std::string fit = REXCVAR_GET(fifa19_screen_fit);
+  rex::cvar::SetFlagByName("present_allow_overscan_cutoff", fit == "fill" ? "true" : "false");
+  rex::cvar::SetFlagByName("present_safe_area_x", "90");
+  rex::cvar::SetFlagByName("present_safe_area_y", "90");
+  rex::cvar::SetFlagByName("present_letterbox", fit == "stretch" ? "false" : "true");
   Fifa19DevPadStart();
 }
 

@@ -10,6 +10,17 @@
 //   set <cvar> <value>          shot <name>   (the next presented frame to <fifa19_shot_dir>/<name>.ppm)
 //   burst <name> <count>        (that many consecutive presented frames, <name>-000.ppm on: flicker)
 //
+// Reading the screen (macOS Vision, dev_pad_ocr.mm), so a script follows the menus instead of guessing their timing:
+//   ocr                         logs every line of text on the screen, its place and the colour behind it
+//   waitfor <timeout> <text>    until <text> is on the screen (case and punctuation ignored); a timeout fails
+//   select <button> <max> <text>   presses <button> (up to max times) until <text> is the highlighted item
+//   choose <max> <row> = <value>   presses right (up to max times) until the row <row> shows <value>
+//   expect <text>               fails (and saves a shot) unless <text> is on the screen
+//   ifscreen <text> : <command>   runs <command> only when <text> is on the screen (a notice to dismiss)
+//
+// Guest memory (addresses and sizes in hex): dump <address> <size> <name> (to <fifa19_shot_dir>/<name>.bin),
+// peek <address> [size] (logs bytes), poke <address> <byte hex> (big-endian as the guest sees it, e.g. 0000002A)
+//
 // Buttons: a b x y lb rb back start ls rs up down left right. Durations: 500ms, 2s, 1.5s.
 // The pipe: `mkfifo pad; ./fifa19 --fifa19_pad_pipe=pad`, then `echo "press start" > pad`.
 #include <sys/stat.h>
@@ -20,6 +31,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -32,7 +45,10 @@
 #include <rex/input/input_system.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
+#include <rex/system/xmemory.h>
 #include <rex/ui/virtual_key.h>
+
+#include "dev_pad_ocr.h"
 
 REXCVAR_DEFINE_STRING(fifa19_pad_script, "", "FIFA19",
                       "Development: a file of scripted controller commands to run after start-up");
@@ -194,6 +210,103 @@ void SetButton(uint16_t bit, bool down) {
   g_pad.buttons = down ? (g_pad.buttons | bit) : (g_pad.buttons & ~bit);
 }
 
+// --- Reading the screen ---
+
+// Lower case letters and digits, one space between words: what the recognizer reads and what a script says compare.
+std::string Normalize(const std::string& text) {
+  std::string out;
+  bool space = false;
+  for (unsigned char c : text) {
+    if (std::isalnum(c)) {
+      if (space && !out.empty()) out += ' ';
+      out += char(std::tolower(c));
+      space = false;
+    } else {
+      space = true;
+    }
+  }
+  return out;
+}
+
+// The text after the command word(s): "waitfor 30s Kick Off" with skip 2 is "Kick Off".
+std::string Rest(const std::string& line, int skip) {
+  std::istringstream in(line);
+  std::string word;
+  for (int i = 0; i < skip; ++i) in >> word;
+  std::string rest;
+  std::getline(in, rest);
+  const size_t first = rest.find_first_not_of(" \t");
+  return first == std::string::npos ? std::string() : rest.substr(first);
+}
+
+std::string ShotPath(const std::string& name) {
+  const std::string dir = REXCVAR_GET(fifa19_shot_dir);
+  std::error_code error;
+  std::filesystem::create_directories(dir, error);
+  return (std::filesystem::path(dir) / (name + ".ppm")).string();
+}
+
+// The next presented frame, read: a one-frame burst (not limited to one capture in 2 s like `shot`).
+bool ReadScreen(DevPadFrame& frame, const std::string& keep_as = {}) {
+  const std::string stem = ShotPath(".screen");
+  const std::string file = stem.substr(0, stem.size() - 4) + "-000.ppm";
+  std::error_code error;
+  std::filesystem::remove(file, error);
+  rex::cvar::SetFlagByName("metal_present_capture_burst", "1");
+  rex::cvar::SetFlagByName("metal_present_capture", stem);
+  bool written = false;
+  for (int waited = 0; waited < 60 && !written; ++waited) {
+    Sleep(std::chrono::milliseconds(50));
+    written = std::filesystem::exists(file, error);
+  }
+  rex::cvar::SetFlagByName("metal_present_capture", "");
+  rex::cvar::SetFlagByName("metal_present_capture_burst", "0");
+  if (!written) {
+    REXLOG_WARN("dev pad: no frame captured (is the window painting?)");
+    return false;
+  }
+  if (!keep_as.empty()) std::filesystem::copy_file(file, ShotPath(keep_as),
+                                                   std::filesystem::copy_options::overwrite_existing, error);
+  return DevPadReadText(file, frame);
+}
+
+const DevPadTextLine* FindLine(const DevPadFrame& frame, const std::string& text) {
+  const std::string want = Normalize(text);
+  for (const auto& line : frame.lines) {
+    if (Normalize(line.text).find(want) != std::string::npos) return &line;
+  }
+  return nullptr;
+}
+
+// A highlighted item: FIFA marks it with a saturated (blue or teal) bar, where the others are white, grey or
+// see-through over a darker picture. Saturation of the mean colour behind the text, 0..255.
+int Saturation(const DevPadTextLine& line) {
+  const int hi = std::max({line.rgb[0], line.rgb[1], line.rgb[2]});
+  const int lo = std::min({line.rgb[0], line.rgb[1], line.rgb[2]});
+  return hi - lo;
+}
+
+void LogScreen(const DevPadFrame& frame) {
+  for (const auto& line : frame.lines) {
+    REXLOG_INFO("dev pad: ocr \"{}\" at {:.3f},{:.3f} size {:.3f}x{:.3f} behind #{:02x}{:02x}{:02x} (sat {})",
+                line.text, line.x, line.y, line.w, line.h, line.rgb[0], line.rgb[1], line.rgb[2], Saturation(line));
+  }
+}
+
+int g_failures = 0;
+
+// A failed check: logged with a shot of the screen to look at afterwards.
+bool Failed(const std::string& what) {
+  const std::string name = "fail-" + std::to_string(++g_failures);
+  DevPadFrame frame;
+  ReadScreen(frame, name);
+  REXLOG_WARN("dev pad: FAILED {} (screen in {}; it reads:)", what, ShotPath(name));
+  LogScreen(frame);
+  return false;
+}
+
+bool Execute(const std::string& line);
+
 // Runs one command; false for an error (logged).
 bool Execute(const std::string& line) {
   std::istringstream in(line);
@@ -282,6 +395,130 @@ bool Execute(const std::string& line) {
     Sleep(std::chrono::milliseconds(500));
     rex::cvar::SetFlagByName("metal_present_capture", "");
     REXLOG_INFO("dev pad: burst of {} frames to {}", count, path);
+    return true;
+  }
+  if (cmd == "dump" || cmd == "peek" || cmd == "poke") {
+    const uint32_t address = uint32_t(std::strtoul(a.c_str(), nullptr, 16));
+    auto* memory = rex::Runtime::instance() ? rex::Runtime::instance()->memory() : nullptr;
+    if (!memory || !address) {
+      REXLOG_WARN("dev pad: no guest memory for '{}'", line);
+      return false;
+    }
+    uint8_t* host = memory->TranslateVirtual(address);
+    if (cmd == "poke") {
+      std::string hex = b;
+      for (size_t i = 0; i + 1 < hex.size(); i += 2)
+        host[i / 2] = uint8_t(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16));
+      REXLOG_INFO("dev pad: poke {:08X} = {}", address, hex);
+      return true;
+    }
+    const uint32_t size = b.empty() ? 16 : uint32_t(std::strtoul(b.c_str(), nullptr, 16));
+    if (cmd == "peek") {
+      std::string hex;
+      for (uint32_t i = 0; i < size && i < 256; ++i) hex += fmt::format("{:02X}{}", host[i], (i % 4 == 3) ? " " : "");
+      REXLOG_INFO("dev pad: peek {:08X}: {}", address, hex);
+      return true;
+    }
+    const std::string path = ShotPath(c).substr(0, ShotPath(c).size() - 4) + ".bin";
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(host), size);
+    REXLOG_INFO("dev pad: dumped {:08X}+{:X} to {}", address, size, path);
+    return true;
+  }
+  if (cmd == "ocr") {
+    DevPadFrame frame;
+    if (!ReadScreen(frame, a)) return false;
+    REXLOG_INFO("dev pad: ocr: {} lines", frame.lines.size());
+    LogScreen(frame);
+    return true;
+  }
+  if (cmd == "waitfor" || cmd == "expect") {
+    const bool wait = cmd == "waitfor";
+    const std::string text = Rest(line, wait ? 2 : 1);
+    const auto deadline = std::chrono::steady_clock::now() + (wait ? Duration(a, 30000) : std::chrono::milliseconds(0));
+    do {
+      DevPadFrame frame;
+      if (ReadScreen(frame) && FindLine(frame, text)) {
+        REXLOG_INFO("dev pad: on the screen: {}", text);
+        return true;
+      }
+      if (wait) Sleep(std::chrono::milliseconds(400));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return Failed(cmd + " '" + text + "'");
+  }
+  if (cmd == "select") {
+    const uint16_t bit = ButtonBit(a);
+    const int max = std::atoi(b.c_str());
+    const std::string text = Rest(line, 3);
+    if (!bit || text.empty()) {
+      REXLOG_WARN("dev pad: select <button> <max> <text>, not '{}'", line);
+      return false;
+    }
+    for (int presses = 0;; ++presses) {
+      DevPadFrame frame;
+      if (ReadScreen(frame)) {
+        // The item, and the most saturated of the others: highlighted when it stands out from all of them.
+        const DevPadTextLine* item = FindLine(frame, text);
+        int others = 0;
+        for (const auto& l : frame.lines)
+          if (&l != item) others = std::max(others, Saturation(l));
+        if (item && Saturation(*item) >= 60 && Saturation(*item) > others) {
+          REXLOG_INFO("dev pad: selected {} after {} presses", text, presses);
+          return true;
+        }
+      }
+      if (presses >= max) break;
+      Execute("press " + a);
+      Sleep(std::chrono::milliseconds(450));
+    }
+    return Failed("select '" + text + "'");
+  }
+  if (cmd == "choose") {
+    // choose <max> <row> = <value>: the row's label and the value shown to its right on the same line.
+    const int max = std::atoi(a.c_str());
+    const std::string spec = Rest(line, 2);
+    const size_t eq = spec.find('=');
+    if (eq == std::string::npos) {
+      REXLOG_WARN("dev pad: choose <max> <row> = <value>, not '{}'", line);
+      return false;
+    }
+    const std::string row = spec.substr(0, eq), value = Normalize(spec.substr(eq + 1));
+    for (int presses = 0;; ++presses) {
+      DevPadFrame frame;
+      std::string shown;
+      if (ReadScreen(frame)) {
+        if (const DevPadTextLine* label = FindLine(frame, row)) {
+          const float mid = label->y + label->h * 0.5f;
+          for (const auto& l : frame.lines) {
+            if (&l == label || l.x <= label->x || mid < l.y || mid > l.y + l.h) continue;
+            shown += Normalize(l.text) + " ";
+          }
+          // The label and its value read as one line.
+          shown += Normalize(label->text);
+        }
+      }
+      if (!shown.empty() && shown.find(value) != std::string::npos) {
+        REXLOG_INFO("dev pad: {} is {} after {} presses", row, spec.substr(eq + 1), presses);
+        return true;
+      }
+      if (presses >= max) break;
+      Execute("press right");
+      Sleep(std::chrono::milliseconds(450));
+    }
+    return Failed("choose '" + spec + "'");
+  }
+  if (cmd == "ifscreen") {
+    const std::string spec = Rest(line, 1);
+    const size_t colon = spec.find(" : ");
+    if (colon == std::string::npos) {
+      REXLOG_WARN("dev pad: ifscreen <text> : <command>, not '{}'", line);
+      return false;
+    }
+    DevPadFrame frame;
+    if (ReadScreen(frame) && FindLine(frame, spec.substr(0, colon))) {
+      REXLOG_INFO("dev pad: {} is on the screen", spec.substr(0, colon));
+      return Execute(spec.substr(colon + 3));
+    }
     return true;
   }
   if (cmd == "quit") {

@@ -87,7 +87,11 @@ final class Game: ObservableObject {
     }
     var programInstalled: Bool { FileManager.default.isExecutableFile(atPath: paths.program.path) }
 
-    func play() {
+    /// Tests: FIFA19_LAUNCHER_ARGS adds options (after the Extra options), FIFA19_LAUNCHER_BACKGROUND=1 keeps the
+    /// game's window in the background, and with FIFA19_LAUNCHER_PLAY=1 the launcher quits when the game does.
+    static let testEnv = ProcessInfo.processInfo.environment
+
+    func play(extra: [String] = []) {
         guard running == nil, programInstalled else { return }
         let process = Process()
         process.executableURL = paths.program
@@ -95,11 +99,13 @@ final class Game: ObservableObject {
         var arguments = ["--log_file=\(paths.log.path)"]
         if gameInstalled { arguments.append("--game_data_root=\(gameFolder)") }
         arguments += extraArguments.split(separator: " ").map(String.init)
+        arguments += (Game.testEnv["FIFA19_LAUNCHER_ARGS"] ?? "").split(separator: " ").map(String.init)
+        arguments += extra
         process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
         if metalHud { env["MTL_HUD_ENABLED"] = "1" }
         if metalValidation { env["MTL_DEBUG_LAYER"] = "1"; env["METAL_DEVICE_WRAPPER_TYPE"] = "1" }
-        if backgroundWindow { env["SDL_MAC_BACKGROUND_APP"] = "1"; env["SDL_WINDOW_ACTIVATE_WHEN_SHOWN"] = "0" }
+        if backgroundWindow || Game.testEnv["FIFA19_LAUNCHER_BACKGROUND"] == "1" { env["SDL_MAC_BACKGROUND_APP"] = "1"; env["SDL_WINDOW_ACTIVATE_WHEN_SHOWN"] = "0" }
         process.environment = env
         process.terminationHandler = { [weak self] finished in
             let status = finished.terminationStatus, reason = finished.terminationReason
@@ -107,6 +113,7 @@ final class Game: ObservableObject {
                 guard let self else { return }
                 self.running = nil
                 self.reload()
+                if Game.testEnv["FIFA19_LAUNCHER_PLAY"] == "1" { exit(status == 0 ? 0 : 1) }
                 if reason == .uncaughtSignal || status != 0 {
                     self.lastExit = "The game stopped (\(reason == .uncaughtSignal ? "signal" : "exit code") \(status)). "
                         + "Its log: \(self.paths.log.path)"
