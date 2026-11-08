@@ -5,7 +5,8 @@
 #   sh launcher/mac/build.sh [output]      # default out/launcher-mac/fifa19-launcher
 #
 # On its own it finds the game through FIFA19_DIR (the folder with fifa19); FIFA19_LAUNCHER_PAGE=graphics opens
-# a page and FIFA19_LAUNCHER_PLAY=1 presses Play (tests, screenshots).
+# a page, FIFA19_LAUNCHER_PLAY=1 presses Play (tests), FIFA19_LAUNCHER_SNAPSHOT=<file.png> draws the window into a
+# file and quits (no screen recording permission; it never takes focus).
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"

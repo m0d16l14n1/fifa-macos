@@ -9,6 +9,7 @@ struct Setting: Identifiable {
         case choice([(value: String, label: String)])
         case numberChoice([(value: Double, label: String)])
         case number(range: ClosedRange<Int>)
+        case text  // free text, applied when edited (a key binding: comma-separated SDL key names)
     }
 
     let key: String
@@ -65,7 +66,36 @@ struct Setting: Identifiable {
         Setting(key: "mnk_mouse", title: "Mouse as the right stick", detail: "Skill moves with the mouse.",
                 kind: .toggle, defaultValue: .bool(false)),
         Setting(key: "audio_mute", title: "Mute audio", detail: "", kind: .toggle, defaultValue: .bool(false)),
-    ]
+    ] + keys
+
+    // The keyboard as pad one (FIFA's keyboard-only Classic layout by default, Fifa19App's SetKeyboardDefaults):
+    // each pad control's keys, comma-separated SDL key names (Return, Backspace, Shift+Up, Numpad8...).
+    static let keys: [Setting] = [
+        ("keybind_a", "A: short pass, tackle, menu accept", "S,Return"),
+        ("keybind_b", "B: shoot, push or pull, menu back", "D,Backspace"),
+        ("keybind_x", "X: lob pass, cross, slide tackle", "A"),
+        ("keybind_y", "Y: through ball, goalkeeper rush", "W"),
+        ("keybind_left_shoulder", "LB: change player, player run", "Q"),
+        ("keybind_right_shoulder", "RB: finesse, teammate contain", "C"),
+        ("keybind_left_trigger", "LT: protect the ball, jockey", "Z"),
+        ("keybind_right_trigger", "RT: sprint", "E"),
+        ("keybind_lstick_up", "Move up", "Up"),
+        ("keybind_lstick_down", "Move down", "Down"),
+        ("keybind_lstick_left", "Move left", "Left"),
+        ("keybind_lstick_right", "Move right", "Right"),
+        ("keybind_lstick_press", "Left stick press", "F"),
+        ("keybind_rstick_press", "Right stick press: flick up for a volley", "T"),
+        ("keybind_rstick_up", "Skill moves: up", "Numpad8,I"),
+        ("keybind_rstick_down", "Skill moves: down", "Numpad2,K"),
+        ("keybind_rstick_left", "Skill moves: left", "Numpad4,J"),
+        ("keybind_rstick_right", "Skill moves: right", "Numpad6,L"),
+        ("keybind_dpad_up", "Tactics: up", "Shift+Up"),
+        ("keybind_dpad_down", "Tactics: down", "Shift+Down"),
+        ("keybind_dpad_left", "Tactics: left", "Shift+Left"),
+        ("keybind_dpad_right", "Tactics: right", "Shift+Right"),
+        ("keybind_start", "Start: pause", "Escape,Space"),
+        ("keybind_back", "Back", "Tab"),
+    ].map { Setting(key: $0.0, title: $0.1, detail: "", kind: .text, defaultValue: .string($0.2)) }
 }
 
 struct SettingsPage: View {
@@ -110,8 +140,31 @@ struct SettingsPage: View {
                         in: range, step: 50) {
                     Text("\(s.title): \(current.int ?? range.lowerBound)")
                 }
+            case .text:
+                KeyField(title: s.title, value: current.string ?? "") { text in
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    game.set(s.key, trimmed.isEmpty ? nil : .string(trimmed), default: s.defaultValue)
+                }
             }
             if !s.detail.isEmpty { Text(s.detail).font(.caption).foregroundStyle(.secondary) }
         }
+    }
+}
+
+// A text setting that is written when editing ends (return or leaving the field), not on every keystroke.
+private struct KeyField: View {
+    let title: String
+    let value: String
+    let commit: (String) -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(title, text: $text)
+            .focused($focused)
+            .onAppear { text = value }
+            .onChange(of: value) { _, new in if !focused { text = new } }
+            .onSubmit { commit(text) }
+            .onChange(of: focused) { _, now in if !now { commit(text) } }
     }
 }

@@ -75,6 +75,7 @@ Notes:
     `_dpad_*`, `_start` and `_back`.
   - A bind like `Shift+Up` needs exactly that modifier held, and a bind without one needs none held. So Shift,
     Ctrl and Alt can't be action keys by themselves.
+- The launcher's Controls page edits every binding (an empty field goes back to the default).
 - `--mnk_mode=false` turns the keyboard off. The mouse isn't used: `--mnk_mouse=true` makes it the right stick.
 
 ## Status

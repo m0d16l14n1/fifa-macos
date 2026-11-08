@@ -30,7 +30,6 @@ how it is checked. Done items move to the end with their date.
 |---|---|---|
 | A2 | Port LibertyRecomp's Core Audio driver (AUHAL, real-time thread, lock-free ring) without its GTA IV diagnostics; SDL as fallback. Only for latency now: the SDL path has no underruns (A1, D20) | lower latency, still no underruns |
 | I1 | Controller hot-plug goes to pad one; DualSense/DualShock prompts where possible; rumble | plug/unplug mid-match |
-| I2 | The launcher's Controls page edits the keyboard layout (`keybind_*` cvars) | |
 
 ## Temporal, frame generation, Metal 4 (M5, M6)
 
@@ -64,4 +63,5 @@ how it is checked. Done items move to the end with their date.
 | D19 | MetalFX temporal AA no longer soft (T5): contrast-adaptive sharpening after it (`metal_taa_sharpness` 0.6, `patches/fifa/0023`): local contrast 11.2 against 10.4 without temporal AA, 5.2 before | 2026-11-08 |
 | D20 | The SDL audio path measured (A1): no underruns in 8 runs (matches at 60 and uncapped, walk-outs, frame generation on), the underrun warnings of `sdl_audio_driver` silent | 2026-11-08 |
 | D21 | Benchmark baseline (P4), M5 MacBook Air, `bench_mac.sh`, Kick Off, uncapped (`gpu_vblank_display_sync=false`), HUD on: 85.4 FPS (11.7 ms a frame, GPU busy 21.9 ms, CPU waiting 0.2 ms); with temporal AA 85.3 (no measurable cost: matches are bound by the command processor). The benchmark's pad script had a bad line that left it running; the dev pad now skips a failing line | 2026-11-08 |
+| D22 | The launcher's Controls page edits the keyboard layout (I2): a field per pad control (comma-separated SDL key names; an empty field goes back to FIFA's default), written to `fifa19.toml` when editing ends. `FIFA19_LAUNCHER_SNAPSHOT=<file.png>` draws the launcher's window into a file (checked with it) | 2026-11-08 |
 | D9 | `cache:\` mounted (C1): `~/Library/Application Support/FIFA 19/cache-partition` | 2026-11-07 |
