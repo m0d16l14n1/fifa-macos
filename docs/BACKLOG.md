@@ -41,7 +41,7 @@ how it is checked. Done items move to the end with their date.
 |---|---|
 | T8 | Frame generation: at some walk-out cuts one presented frame is a blend of the two shots (1 of 2 runs); either a cut still seen a frame late or the game's own dissolve. Bursts at the cuts with `temporal_aa_debug 11` | `cut3*` runs |
 | T7 | The players' own motion in the vectors (their skinning with last frame's bone constants): not needed for the match camera (no trails on running players with temporal AA, 1:1 bursts), possibly for close cut-scene shots and frame generation | `tb1`, `wt*` bursts |
-| R1 | A higher internal resolution than 1280x720 (EDRAM scaling) before any upscaler work. The player finds the picture blurry on a 4K window: temporal AA runs at 1280x720 and the presenter upscales spatially, so detail is capped by this |
+| R1 | Higher internal resolution: done as whole multiples (`metal_resolution_scale`, `patches/fifa/0026`; launcher: Internal resolution). 2x is right in matches and the walk-out with temporal AA at 2560x1440, but costs ~3.5x the GPU (MacBook Air M5: ~43 ms a frame in play, against ~17 at 1x). Next: MetalFX temporal upscaling into the 2x targets (the scene drawn at 1280x720 in their corner, post-processing and HUD at 2x), the cost of 1x with most of the detail; FIFA's scene is MSAA 2x drawn as 1x, which the squeeze (`TaaUpscaleDecide`) refuses today |
 | T9 | Crowd and the pitch's edge blurry or ghosting with temporal AA (player, 2026-11-08): the crowd's cards animate where the motion vectors only carry the camera. A reactive mask for the crowd's draws (VS 4136505A) to MetalFX | user report | crowd as sharp with temporal AA as without |
 | M1 | Metal 4 path beside Metal 3 (PLAN M6) |
 
