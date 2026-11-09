@@ -156,7 +156,35 @@ The PC game's kit packs are Frosty mods (`.fbmod`): Frostbite textures, BC1 and 
   another's slot (the RPL pack: Zenit in 111285) is mapped in `kits.json`, and its slots without a club here are
   skipped. Clubs the update made (from 125000) are found by name.
 - **Not convertible.** Boots, gloves and balls are Frostbite meshes, a different model from the Xbox's; the game
-  has no player pictures for minifaces. The far-distance kit textures stay the game's.
+  uses different meshes. The far-distance kit textures stay the game's.
+
+### Current minifaces and stadium/UI visuals
+
+`tools/modding/minifaces.py` ports the packs listed in `leagues/minifaces.json`. Real-player pictures keep EA's
+stable `heads/p<playerid>.dds` names: FC 27 wins where it has a usable picture and FC 25 fills its omissions —
+including the FC 27 pack's beta placeholders, whose RGB is noise and whose alpha is fully opaque (about 5,200 of
+its files, 3,200 of them with an FC 25 picture) and its pictures with a full patterned backdrop (FC 25 has the
+same players as clean cutouts). The newer 180x180 images carry a screen-door alpha (the newer game's coverage
+pattern): isolated holes and a high-frequency edge are measured, and a blurred coverage mask turns them back into
+an ordinary cutout; FC 25's own clean alpha is left alone. Every picture is Lanczos
+resized and encoded as the game's 128x128 one-level DXT5. FC 19 does not request newer games'
+`youthheads/p460000...` paths; it requests 1,007 generic `playerheads` appearance keys. The converter rejects
+blank, malformed and checker-patterned beta images from the generated pack, then maps 1,007 unique clean male
+portraits to those keys by colour/hair/silhouette similarity. The mapping and source counts are recorded in
+`out/mod/update/minifaces.json` (the current packs: 25,987 real-player pictures converted, 13,194 kept for the
+update's players, and 1,007 generated pictures). `fc27.py` records the dump's player ids against this game's;
+`minifaces.py` copies those pictures under the update's ids (11,919 of the kept pictures; the other 1,275 are
+legends and older players whose own FC id is this game's), so players matched by name and the new players made
+from the dump get them too, and drops pictures no database player uses (and coincidental FC pictures under newly
+assigned ids).
+
+`tools/modding/visualassets.py` ports the extracted current packs in `tools/modding/sources`: 1024x2048 adboard
+atlases become the game's 512x1024 DXT1 RX3 texture; 256px PNG crests become all five menu sizes and light/dark
+variants; FC 26 banners replace the game's 1024x512 RX3 texture; the first four FC 26 crowd-flag designs replace
+the four 128px textures in each flag RX3. Every RX3 keeps this game's own model/container, and clubs are filtered
+through the update's `teams.csv`; general and competition adboards are retained as well. The current packs give
+186 adboards, 475 clubs' crests (4,750 DDS files), 484 banners and 484 flags; text and formats are checked by
+decoding every written file back.
 
 `fbmod.py` reads the mods (`list`, `info`, `extract`), `fbtex.py` their textures, `rx3.py` the game's (`list`,
 `png`). Oodle has no open encoder, but powzix's ooz decodes it: `build_ooz.sh` builds it for x86_64 (its SSE),
@@ -349,8 +377,10 @@ Each mod's database replaces the game's whole, so a league and the squads must b
 5. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`: the new
    leagues', and the resized);
 6. the PC kit mods' kits, menu pictures, flags and banners (`fbkits.py`), when they are there;
-7. the free agents kept to the best 500 (`freeagents.py`), the tables' places once each (`tables.py`);
-8. the calendar, 8 years on (`calendar_shift.py`).
+7. the free agents kept to the best 500 (`freeagents.py`);
+8. FC 25/27 real and generated minifaces (`minifaces.py`), and the current adboards, menu crests, banners and
+   crowd flags (`visualassets.py`);
+9. the tables' places once each (`tables.py`), the calendar 8 years on (`calendar_shift.py`).
 
 A player the file rated keeps its ratings in the ESPN steps; they only move him to his club. Matching ESPN's
 players to the game's: name and birth date, the birth year within three, a near spelling (the update's
@@ -373,6 +403,8 @@ Career's AI doesn't buy for them.
 | `tools/modding/compdata.py` | the competitions: `add` a league, `resize` leagues to today's clubs |
 | `tools/modding/tables.py` | every league's table places once each |
 | `tools/modding/fbkits.py` | PC kit mods (`leagues/kits.json`) to the game's kits, menu pictures, flags, banners |
+| `tools/modding/minifaces.py` | FC 25/27 real and generated minifaces to the game's 128px DDS paths |
+| `tools/modding/visualassets.py` | current adboards, menu crests, crowd flags and banners from extracted PNG packs |
 | `tools/modding/fbmod.py`, `fbtex.py` | Frosty mods: `list`, `info`, `extract`; their textures as images |
 | `tools/modding/rx3.py` | the game's RX3 textures: `list`, `png` |
 | `tools/modding/inimod.py` | a PC Frosty mod of Career's settings as INI patches (the launcher's Mods page) |

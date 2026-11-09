@@ -298,7 +298,11 @@ def main(argv):
         for k, v in sorted(b.strings.items()):
             w.writerow([k, v])
     json.dump(made_clubs.report(), open(os.path.join(outdir, 'fc27-clubs.json'), 'w'), indent=1, ensure_ascii=False)
+    # The dump's player id -> the game's player id. Most are equal (EA keeps ids), but players matched by name
+    # or made fresh have this game's ids; their FC pictures are copied under those ids by minifaces.py.
+    pictures = {str(p['playerid']): str(fc) for fc, p in matched.items() if p.get('playerid')}
     report = {'rated': len(matched) - made, 'by_id': by_id, 'dump_players': len(rows), 'new_players': made,
+              'pictures': pictures,
               'clubs': report_clubs, 'new_clubs': [m['name'] for m in made_clubs.made], 'left': made_clubs.left}
     json.dump(report, open(os.path.join(outdir, 'fc27.json'), 'w'), indent=1, ensure_ascii=False)
     print(f"FC 27: {report['rated']} of the game's players rated ({by_id} by id) of {len(rows)}; "

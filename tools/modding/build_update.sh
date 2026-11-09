@@ -9,9 +9,10 @@
 #   5. their kits, crests and logos, the Legends' copied heads (teamassets.py), their competitions, and the
 #      competitions of leagues with more or fewer clubs today, fitted to them (compdata.py);
 #   6. PC kit mods' kits, menu pictures, crowd flags and banners, converted (fbkits.py, leagues/kits.json);
-#   7. the free agents kept to the best 500, as the game's own pool (freeagents.py), and every league's table
-#      places once each (tables.py: Career fills the tables of leagues under way from them);
-#   8. the calendar 8 years on: Career starts in July 2026 (calendar_shift.py).
+#   7. the free agents kept to the best 500, as the game's own pool (freeagents.py);
+#   8. FC 25/27 real-player minifaces and FC 27 generated-player portraits, converted to the game's DDS paths
+#      and formats (minifaces.py); current FC adboards, menu crests, crowd flags and banners (visualassets.py);
+#   9. every league's table places once each (tables.py), and the calendar 8 years on (calendar_shift.py).
 # Each step works on the tables the one before left. The mod lands in out/mods/update; put it (or a link to it) in
 # ~/Library/Application Support/FIFA 19/Mods. ESPN's files are cached in out/moddata/espn (fetched when missing).
 #
@@ -78,7 +79,23 @@ if python3 -c "import json,os,sys; os.chdir(sys.argv[2]); sys.exit(not any(os.pa
   python3 "$here/fbkits.py" "$here/leagues/kits.json" "$game" "$mod" "$work/csv" \
     "$work/squads-clubs.json" "$work/fc27-clubs.json" "$work"/league-*.json | tail -1
 fi
+# The free agents kept to the best 500, as the game's own pool. The steps after this one use the final players
+# table: pictures are made only for the players the database still has.
 python3 "$here/freeagents.py" "$work/csv" 500
+# Current UI/stadium visuals. The direct PNG packs deliberately run after Frosty kit packs, so their newer
+# banners and flags win. Missing source folders simply produce zero files.
+python3 "$here/visualassets.py" "$game" "$mod" "$work/csv"
+
+# Newer FC minifaces: FC 27 wins per player, FC 25 fills omissions; generated portraits are mapped to FIFA 19's
+# generic playerhead keys. FETM sources need the same Oodle decoder as Frosty mods. fc27.py's picture ids and the
+# update's players table map the pictures onto the ids this game gives the players (and drop unused ones).
+if [ -f "$here/sources/minifaces/fc27-mini-faces-for-fc26.fifamod" ] || \
+   [ -f "$here/sources/minifaces/better-regen-minifaces.fifamod" ]; then
+  [ -x "$root/out/tools/ooz-x86" ] || sh "$here/build_ooz.sh"
+fi
+python3 "$here/minifaces.py" "$here/leagues/minifaces.json" "$game" "$mod" "$work/minifaces.json" \
+  "$work/fc27.json" "$work/csv/players.csv"
+
 python3 "$here/tables.py" "$work/csv"
 python3 "$here/calendar_shift.py" 8 "$work/csv"
 

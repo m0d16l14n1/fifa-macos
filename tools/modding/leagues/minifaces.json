@@ -1,0 +1,24 @@
+{
+  "assigned_from": 260000,
+  "real": [
+    {
+      "name": "FC 25",
+      "path": "sources/minifaces/FC 25 Minifaces.rar",
+      "kind": "rar"
+    },
+    {
+      "name": "FC 27 for FC 26",
+      "path": "sources/minifaces/fc27-mini-faces-for-fc26.fifamod",
+      "kind": "fifamod",
+      "folder": "heads"
+    }
+  ],
+  "generated": {
+    "name": "Better Regen Minifaces 27",
+    "path": "sources/minifaces/better-regen-minifaces.fifamod",
+    "kind": "fifamod",
+    "folder": "youthheads",
+    "male_max_id": 470099,
+    "max_alpha_edge_score": 12.0
+  }
+}
