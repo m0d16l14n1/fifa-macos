@@ -219,7 +219,11 @@ def resize(src, out, csvdir, league_ids):
             delta = n - n0
             f['standings'] = [r for r in f['standings'] if int(r[0]) != g]
             f['standings'] += [[str(g), str(pos)] for pos in range(n)]
-            moved = lambda pos: pos + delta if pos > n0 // 2 else pos
+            # The places that move with the size are the bottom's: those the group marks as relegation (or its
+            # play-off); the top's (champion, promotion, cups, MLS's play-offs) stay where they are.
+            bottom = {int(r[2]) for r in f['settings'] if int(r[0]) == g and r[2].isdigit() and
+                      r[1].startswith(('info_slot_releg', 'info_color_slot_releg'))}
+            moved = lambda pos: pos + delta if pos in bottom else pos
             for r in f['settings']:
                 if int(r[0]) == g and r[1].startswith(('info_slot_', 'info_color_slot_')) and \
                         not r[1].startswith('info_color_slot_adv') and r[2].isdigit():

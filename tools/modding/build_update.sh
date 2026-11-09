@@ -9,7 +9,8 @@
 #   5. their kits, crests and logos, the Legends' copied heads (teamassets.py), their competitions, and the
 #      competitions of leagues with more or fewer clubs today, fitted to them (compdata.py);
 #   6. PC kit mods' kits, menu pictures, crowd flags and banners, converted (fbkits.py, leagues/kits.json);
-#   7. the free agents kept to the best 500, as the game's own pool (freeagents.py);
+#   7. the free agents kept to the best 500, as the game's own pool (freeagents.py), and every league's table
+#      places once each (tables.py: Career fills the tables of leagues under way from them);
 #   8. the calendar 8 years on: Career starts in July 2026 (calendar_shift.py).
 # Each step works on the tables the one before left. The mod lands in out/mods/update; put it (or a link to it) in
 # ~/Library/Application Support/FIFA 19/Mods. ESPN's files are cached in out/moddata/espn (fetched when missing).
@@ -78,6 +79,7 @@ if python3 -c "import json,os,sys; os.chdir(sys.argv[2]); sys.exit(not any(os.pa
     "$work/squads-clubs.json" "$work/fc27-clubs.json" "$work"/league-*.json | tail -1
 fi
 python3 "$here/freeagents.py" "$work/csv" 500
+python3 "$here/tables.py" "$work/csv"
 python3 "$here/calendar_shift.py" 8 "$work/csv"
 
 # The database: the tables the steps changed.

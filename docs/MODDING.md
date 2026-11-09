@@ -281,6 +281,12 @@ today than the game's 2018 (MLS 30 for 23, Argentina 30 for 26, Brazil's Série 
 conferences split by longitude) and the rounds that many need, its match days spread over the season again.
 The rest keep the game's sizes: a division gets ESPN's clubs up to its places.
 
+A league's clubs also need their table places (leagueteamlinks' `currenttableposition`) once each: a Career that
+starts while a league's year is under way (MLS, Argentina, Brazil: their seasons are the calendar year's) fills
+its table from them, and a place held twice leaves clubs out ("TBD"): MLS played no league match, and its
+play-offs read clubs that weren't there. `tables.py` numbers each league's places again where they repeat (the
+moves between divisions, a grown league's new clubs) and leaves the rest as the game has them.
+
 ## New clubs
 
 In a league whose size stays (most of them), a club the game hasn't (Wrexham, Elversberg, Como) comes in only as
@@ -297,10 +303,16 @@ Basaksehir), else it would be made twice.
 The game's Career starts on 1 July 2018. `tools/modding/calendar_shift.py` moves it to 2026:
 
 - **Career's first day** is `CALSTART_YEAR` in `footballcompeng/data/cmsettings.ini` (2018), not the competitions:
-  moving compdata's years alone left Career in July 2018.
-- **The competitions' years** (`schedule_year_start`) move 8 years, so the tournaments every four years keep
-  theirs (2030's World Cup as 2022's). The match days stay as written for 2018: `schedule_year_real` tells the
-  game which year they are for, and it moves them to the same weekday.
+  moving compdata's years alone left Career in July 2018. `CALSTART_MONTH` goes from January to July: a Career
+  in a calendar year's league (MLS) began in February, with Europe's season then under way unknown to the game,
+  and the game stopped itself on 1 August when those leagues played; from July, MLS's is joined mid-season.
+- **The competitions keep the game's years** (`schedule_year_start`: the root's 2017, Career's first season
+  2018). Moving them on as well left every league whose season spans two years (England's, Germany's...) without
+  a single fixture in 2026/27, and a Career started in February (MLS's) faulted on 1 July, when those seasons
+  began. Kept, Career's 2026/27 is the game's ninth season of them: fixtures are drawn on the match days (moved to
+  the same weekday) from the clubs each league has, as the game draws every season after its first. Hence 8 years
+  (a multiple of 4): the tournaments every four years keep their years. The real fixture lists of 2018
+  (`compdata/schedules`) are for 2018 only.
 - **The tournaments' stadiums** (`internationals.txt`) run to 2030 and 2032 in the game; they repeat after the
   years their lists cover.
 - **Every date in the database** moves 8 years: the update's players, whose births the steps keep 8 years back
@@ -320,7 +332,7 @@ Each mod's database replaces the game's whole, so a league and the squads must b
 5. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`: the new
    leagues', and the resized);
 6. the PC kit mods' kits, menu pictures, flags and banners (`fbkits.py`), when they are there;
-7. the free agents kept to the best 500 (`freeagents.py`);
+7. the free agents kept to the best 500 (`freeagents.py`), the tables' places once each (`tables.py`);
 8. the calendar, 8 years on (`calendar_shift.py`).
 
 A player the file rated keeps its ratings in the ESPN steps; they only move him to his club. Matching ESPN's
@@ -342,6 +354,7 @@ Career's AI doesn't buy for them.
 | `tools/modding/calendar_shift.py` | the calendar 8 years on: Career from July 2026 |
 | `tools/modding/freeagents.py` | the free agents kept to the best 500 |
 | `tools/modding/compdata.py` | the competitions: `add` a league, `resize` leagues to today's clubs |
+| `tools/modding/tables.py` | every league's table places once each |
 | `tools/modding/fbkits.py` | PC kit mods (`leagues/kits.json`) to the game's kits, menu pictures, flags, banners |
 | `tools/modding/fbmod.py`, `fbtex.py` | Frosty mods: `list`, `info`, `extract`; their textures as images |
 | `tools/modding/rx3.py` | the game's RX3 textures: `list`, `png` |
