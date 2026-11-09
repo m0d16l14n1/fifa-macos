@@ -204,14 +204,16 @@ def main(argv):
         for club in sorted(clubs, key=lambda c: -len(clubs[c])):
             if club in found and found[club][0] in in_league:
                 continue
-            if not spare:
+            members = [x['teamid'] for x in b.t['leagueteamlinks'] if x['leagueid'] == league_id]
+            grow = not spare and league_id in map(str, common.get('resize', [])) and len(members) < len(clubs)
+            if not spare and not grow:
                 found.pop(club, None)
                 continue
-            place = spare.pop(0)
+            place = spare.pop(0) if spare else min(members, key=lambda t: int(teams[t].get('overallrating') or 0))
             if club in found:
                 tid = found[club][0]
                 old = next(x for x in b.t['leagueteamlinks'] if x['teamid'] == tid)
-                gone = made_clubs.leave(place)
+                gone = made_clubs.leave(place) if not grow else dict(old)
                 old['prevleagueid'], old['leagueid'] = old['leagueid'], league_id
                 b.t['rowteamnationlinks'] = [x for x in b.t['rowteamnationlinks'] if x['teamid'] != tid]
                 for k in ('previousyeartableposition', 'currenttableposition'):
@@ -220,7 +222,7 @@ def main(argv):
                 c = colors.get(club, {})
                 team = made_clubs.add(c.get('name', club), c.get('short', club), c.get('abbr3'),
                                       c.get('colors', ['808080', 'ffffff']), league_id, place,
-                                      logo=c.get('logo'), source_id=f'fc27-{club}')
+                                      logo=c.get('logo'), source_id=f'fc27-{club}', leave=not grow)
                 tid = team['teamid']
                 teams[tid] = team
                 found[club] = (tid, 0)
@@ -302,8 +304,9 @@ def main(argv):
     print(f"FC 27: {report['rated']} of the game's players rated ({by_id} by id) of {len(rows)}; "
           f"{sum(1 for c in report_clubs if c['teamid'])} clubs' squads, {made} new players, "
           f"{len(made_clubs.made)} clubs made")
-    for new, left in zip(made_clubs.made, made_clubs.left):
-        print(f"  new {new['name']:28} in {left['from']}, in the place of {left['name']} (to Rest of World)")
+    for new in made_clubs.made:
+        print(f"  new {new['name']:28} " + (f"in the place of {teams[new['replaces']]['teamname']}"
+                                             if new['replaces'] else 'added'))
     for c in report_clubs:
         if c['teamid'] is None:
             print(f"  no team for {c['club']}")

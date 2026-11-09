@@ -122,6 +122,29 @@ All in `data/sceneassets` (RX3 files: models with their textures), named by id:
 `chunkzip` or `chunklzx` (EA's chunked deflate or Xbox LZX): `out/tools/unchunk`, built by
 `sh tools/modding/build.sh`, unpacks them. Loose files can be plain (the database is). RX3 editing is MOD2.
 
+### PC kit mods
+
+The PC game's kit packs are Frosty mods (`.fbmod`): Frostbite textures, BC1 and BC7, Oodle-compressed.
+`tools/modding/fbkits.py` makes them the Xbox's, for the mods `leagues/kits.json` lists (git-ignored, in
+`tools/modding/sources`), later ones winning:
+
+- **Kits.** The PC kit's jersey (1024², the same layout as the Xbox's), shorts and socks (the PC's separate
+  textures, put in the Xbox's 1024×512 sheet: shorts left, the socks' two panels right) and crest go into the
+  game's own RX3 for that team, kind and number (`kit0`...`kit2`, `kit`), each mip encoded again (DXT1/DXT5,
+  Pillow) and byte-swapped. A team without that kit in the game gets one on the game's first team's RX3.
+- **Menu pictures.** `data/ui/imgassets/kits0`...: the jersey's front and sleeves on a shirt's silhouette (the
+  game's own), shaded by its folds with the sponsor and crests filtered out.
+- **Crowd flags and banners** (`flag_<team>.rx3`, four 128² textures; `banner_<team>.rx3`).
+- **Teams.** EA keeps team ids from game to game, so a mod's ids are this game's; a mod that puts a club in
+  another's slot (the RPL pack: Zenit in 111285) is mapped in `kits.json`, and its slots without a club here are
+  skipped. Clubs the update made (from 125000) are found by name.
+- **Not convertible.** Boots, gloves and balls are Frostbite meshes, a different model from the Xbox's; the game
+  has no player pictures for minifaces. The far-distance kit textures stay the game's.
+
+`fbmod.py` reads the mods (`list`, `info`, `extract`), `fbtex.py` their textures, `rx3.py` the game's (`list`,
+`png`). Oodle has no open encoder, but powzix's ooz decodes it: `build_ooz.sh` builds it for x86_64 (its SSE),
+run under Rosetta.
+
 ## Competitions
 
 Leagues, cups and their seasons are text files in
@@ -229,7 +252,10 @@ year the game never had. `tools/modding/pcsquads.py` reads it into this game's d
   Colorado...). They become the Legends League (league 69, Rest of World): new teams (from 121000) with the
   clubs' kits, crests, flags, banners and grounds, and the players as the game has them, in 2018, the decade they
   stand for. A legend still playing today (Messi, Ronaldo, Neymar: 162) stays himself at his club, his 2018 self
-  copied to a new id with his head, face and hair files. Legends referees (Collina, Webb...).
+  copied to a new id with his head, face and hair files. Legends referees (Collina, Webb...). The league has no
+  competition, so it is Kick Off's (and the game's other one-off matches'), not Career's: Career lists only the
+  leagues compdata has, as it leaves out Rest of World, and its AI buys only from the leagues `transfers.ini`
+  lists, so neither the clubs nor their players are in a Career's leagues or transfers.
 
 ## The FC 27 ratings
 
@@ -245,10 +271,20 @@ player, put in `tools/modding/sources/stats-dump`, git-ignored) as the last word
   squads: a club is the game's team of that name or, in that league, the one most of its players are in.
   Clubs the game hasn't are made (below), with the colours `fc27.json` gives them and a drawn crest.
 
+## League sizes
+
+A league's size is its competition's: compdata's standings give each group its places, which a `FillFromLeague`
+task fills from the database's league, and the schedule has the rounds for that many. Leagues with more clubs
+today than the game's 2018 (MLS 30 for 23, Argentina 30 for 26, Brazil's Série B, Chile, Colombia...), or fewer
+(the Bundesliga's 2. and 3. Liga as 18), are listed in `world.json`'s (and `fc27.json`'s) `resize`:
+`compdata.py resize` gives their groups today's places (from the clubs the steps put in the league; MLS's two
+conferences split by longitude) and the rounds that many need, its match days spread over the season again.
+The rest keep the game's sizes: a division gets ESPN's clubs up to its places.
+
 ## New clubs
 
-A league's size is fixed by its competition, so a club the game hasn't (Wrexham, Elversberg, Como) comes in only as
-one of the game's leaves. `tools/modding/clubs.py` makes it in the place of a club its division's source doesn't
+In a league whose size stays (most of them), a club the game hasn't (Wrexham, Elversberg, Como) comes in only as
+one of the game's leaves; in a resized one, in a place of its own. `tools/modding/clubs.py` makes it in the place of a club its division's source doesn't
 list (the weakest such): that club's row is the template (level, prestige, budget, tactics), and it goes to Rest
 of World, as the game keeps clubs it has no league for (playable, out of Career's leagues). The new club's kits are
 a club's of the nearest colours, its crest its logo (ESPN's), or its initials on a shield in its colours; ids from
@@ -281,9 +317,11 @@ Each mod's database replaces the game's whole, so a league and the squads must b
    West Ham down...), its size kept; the clubs the game hasn't are made (above);
 3. the leagues the game hasn't (`league.py`: Russia's);
 4. the FC 27 ratings and the squads ESPN hasn't (`fc27.py`), when the dump is there;
-5. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`);
-6. the free agents kept to the best 500 (`freeagents.py`);
-7. the calendar, 8 years on (`calendar_shift.py`).
+5. kits, crests, logos, the legends' copied heads (`teamassets.py`), the competitions (`compdata.py`: the new
+   leagues', and the resized);
+6. the PC kit mods' kits, menu pictures, flags and banners (`fbkits.py`), when they are there;
+7. the free agents kept to the best 500 (`freeagents.py`);
+8. the calendar, 8 years on (`calendar_shift.py`).
 
 A player the file rated keeps its ratings in the ESPN steps; they only move him to his club. Matching ESPN's
 players to the game's: name and birth date, the birth year within three, a near spelling (the update's
@@ -303,6 +341,11 @@ Career's AI doesn't buy for them.
 | `tools/modding/clubs.py` | new clubs in the places of those that leave (for `squads.py` and `fc27.py`) |
 | `tools/modding/calendar_shift.py` | the calendar 8 years on: Career from July 2026 |
 | `tools/modding/freeagents.py` | the free agents kept to the best 500 |
+| `tools/modding/compdata.py` | the competitions: `add` a league, `resize` leagues to today's clubs |
+| `tools/modding/fbkits.py` | PC kit mods (`leagues/kits.json`) to the game's kits, menu pictures, flags, banners |
+| `tools/modding/fbmod.py`, `fbtex.py` | Frosty mods: `list`, `info`, `extract`; their textures as images |
+| `tools/modding/rx3.py` | the game's RX3 textures: `list`, `png` |
+| `tools/modding/build_ooz.sh` | `out/tools/ooz-x86`, the Oodle decoder `fbmod.py` uses |
 | `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check`; the locale's string hash and update files |
 | `tools/modding/unchunk.c` | chunkzip/chunklzx entries to plain bytes |
 | `scripts/run_app.sh --game DIR` | a test run from another game folder, such as a modded game built by hand |
