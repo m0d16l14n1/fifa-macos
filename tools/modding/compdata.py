@@ -3,6 +3,15 @@
 dlc/dlc_footballcompeng/dlc/footballcompeng/data/compdata, in data1.big).
 
   compdata.py add SRCDIR OUTDIR CONFIG.json LEAGUE.json
+  compdata.py resize SRCDIR OUTDIR CSVDIR LEAGUEID...
+
+resize: the leagues' competitions fitted to as many clubs as the database has in them (CSVDIR's leagueteamlinks:
+MLS's 30 for 23, Brazil's 20 for 15). A league's size is its groups' tables (standings.txt: a row a place; MLS's two
+conferences, filled east to west by the clubs' longitude, get half each); its match days must hold the rounds
+(num_games times the rest of the group, or one more round with an odd count) and each day the round's matches.
+Places in a table's bottom half (relegation, relegation playoffs, their colours) move with its size; the top
+half's (title, Europe, the playoffs above) stay. Too few match days: num_games down to 2 if that fits (the
+A-League's 3, Switzerland's 4), else the season's match days are spread again over the same weeks.
 
 SRCDIR: the game's compdata files (unpacked). The new country, its league, stage and group go after the last
 country of the template's confederation (the ids after them move up, in every file), cloned from CONFIG's template league (compdata.template_nation /
@@ -181,7 +190,101 @@ def add(src, out, cfg, league):
     return {'nation': nation, 'league': lg, 'stage': stage, 'group': group, 'rounds': rounds}
 
 
+def resize(src, out, csvdir, league_ids):
+    import csv as _csv
+    f = load(src)
+    crlf = '\r\n' in open(os.path.join(src, 'compobj.txt'), encoding='utf-8', newline='').read(200)
+    with open(os.path.join(csvdir, 'leagueteamlinks.csv'), newline='', encoding='utf-8') as fh:
+        links = list(_csv.DictReader(fh))
+    obj = {int(r[0]): r for r in f['compobj']}
+    kids = {}
+    for i, r in obj.items():
+        kids.setdefault(int(r[4]), []).append(i)
+    setting = lambda i, key: [r for r in f['settings'] if int(r[0]) == i and r[1] == key]
+    report = []
+    for lid in map(str, league_ids):
+        want = sum(1 for x in links if x['leagueid'] == lid)
+        comp = next((i for i, r in obj.items() if r[1] == '3' and r[2] == f'C{lid}'), None)
+        if comp is None or not want:
+            continue
+        fills = [r for r in f['tasks'] if int(r[0]) == comp and r[2] == 'FillFromLeague' and r[4] == lid]
+        groups = [int(r[3]) for r in fills]
+        old = {g: sum(1 for r in f['standings'] if int(r[0]) == g) for g in groups}
+        if sum(old.values()) == want:
+            continue
+        # The places: one group all; several (MLS's conferences) as even as can be, the first the bigger.
+        sizes = {g: want // len(groups) + (1 if k < want % len(groups) else 0) for k, g in enumerate(groups)}
+        for g in groups:
+            n0, n = old[g], sizes[g]
+            delta = n - n0
+            f['standings'] = [r for r in f['standings'] if int(r[0]) != g]
+            f['standings'] += [[str(g), str(pos)] for pos in range(n)]
+            # The places that move with the size are the bottom's: those the group marks as relegation (or its
+            # play-off); the top's (champion, promotion, cups, MLS's play-offs) stay where they are.
+            bottom = {int(r[2]) for r in f['settings'] if int(r[0]) == g and r[2].isdigit() and
+                      r[1].startswith(('info_slot_releg', 'info_color_slot_releg'))}
+            moved = lambda pos: pos + delta if pos in bottom else pos
+            for r in f['settings']:
+                if int(r[0]) == g and r[1].startswith(('info_slot_', 'info_color_slot_')) and \
+                        not r[1].startswith('info_color_slot_adv') and r[2].isdigit():
+                    r[2] = str(moved(int(r[2])))
+            f['settings'] = [r for r in f['settings'] if not (int(r[0]) == g and r[1].startswith(
+                ('info_slot_', 'info_color_slot_')) and r[2].isdigit() and int(r[2]) > n)]
+            for r in f['advancement']:
+                if int(r[0]) == g:
+                    r[1] = str(moved(int(r[1])))
+            f['advancement'] = [r for r in f['advancement'] if not (int(r[0]) == g and int(r[1]) > n)]
+        f['tasks'] = [r for r in f['tasks'] if not (int(r[0]) == comp and r[2] == 'UpdateTable' and
+                                                    int(r[4]) in groups and int(r[5]) > want)]
+        # The match days: whoever holds them (the groups' stage, or a group itself: Japan's).
+        stage = int(obj[groups[0]][4])
+        holder = stage if any(int(r[0]) == stage for r in f['schedule']) else groups[0]
+        by_round = {}
+        for r in f['schedule']:
+            if int(r[0]) == holder:
+                by_round.setdefault(int(r[2]), []).append(r)
+        def games(g):
+            got = setting(g, 'num_games')
+            return int(got[0][2]) if got else 2
+        def needed():
+            return max(games(g) * (sizes[g] if sizes[g] % 2 else sizes[g] - 1) for g in groups)
+        while needed() > len(by_round) and any(games(g) > 2 for g in groups):
+            for g in groups:
+                for r in setting(g, 'num_games'):
+                    r[2] = str(max(2, int(r[2]) - 1))
+        rounds, matches = needed(), sum(sizes[g] // 2 for g in groups)
+        if rounds <= len(by_round):
+            for rnd, rows in by_round.items():
+                left = matches
+                for r in rows:
+                    r[3] = str(min(int(r[3]), left))
+                    left -= int(r[3])
+                short = matches - sum(int(r[4]) for r in rows)
+                if short > 0:
+                    rows[-1][4] = str(int(rows[-1][4]) + short)
+            spread = False
+        else:
+            first = min(int(r[1]) for r in by_round[min(by_round)])
+            last = max(int(r[1]) for r in by_round[max(by_round)])
+            f['schedule'] = [r for r in f['schedule'] if int(r[0]) != holder]
+            for rnd in range(1, rounds + 1):
+                day = first + round((last - 1 - first) * (rnd - 1) / (rounds - 1))
+                f['schedule'] += [[str(holder), str(day), str(rnd), '1', str(matches), '1500'],
+                                  [str(holder), str(day + 1), str(rnd), '0', str(matches), '1700']]
+            spread = True
+        report.append((lid, sum(old.values()), want, rounds, spread))
+    for name in ('standings', 'schedule'):
+        f[name] = sorted(f[name], key=lambda r: int(r[0]))
+    save(f, out, crlf)
+    return report
+
+
 def main(argv):
+    if len(argv) >= 5 and argv[1] == 'resize':
+        for lid, old, new, rounds, spread in resize(argv[2], argv[3], argv[4], argv[5:]):
+            print(f"compdata: league {lid} {old} -> {new} clubs, {rounds} rounds"
+                  + (' (match days spread again)' if spread else ''))
+        return 0
     if len(argv) != 6 or argv[1] != 'add':
         print(__doc__, file=sys.stderr)
         return 2

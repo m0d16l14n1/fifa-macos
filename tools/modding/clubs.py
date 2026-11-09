@@ -66,16 +66,27 @@ class Clubs:
         t['rowteamnationlinks'].append({'teamid': tid, 'nationid': country})
         return link
 
-    def add(self, name, short, abbr3, hex_colors, league_id, template_tid, logo=None, source_id=None):
-        """A new club in league_id, in template_tid's place (that club leaves for Rest of World). Returns its row."""
+    def add(self, name, short, abbr3, hex_colors, league_id, template_tid, logo=None, source_id=None, leave=True,
+            coords=None):
+        """A new club in league_id, in template_tid's place (that club leaves for Rest of World), or beside it
+        (leave=False: a league grown to more clubs). coords: [latitude, longitude, utc offset] (MLS's
+        conferences are filled east to west by longitude). Returns its row."""
         b, t = self.b, self.b.t
         template_tid = str(template_tid)
         template = next(x for x in t['teams'] if x['teamid'] == template_tid)
-        link = self.leave(template_tid)
+        if leave:
+            link = self.leave(template_tid)
+        else:
+            link = dict(next(x for x in t['leagueteamlinks'] if x['teamid'] == template_tid))
+            link['prevleagueid'] = link['leagueid']
         tid = self.next_team
         self.next_team += 1
         team = dict(template)
         team.update(teamid=str(tid), assetid=str(tid), teamname=name, rivalteam=template_tid, genericbanner='1')
+        if coords:
+            team['latitude'], team['longitude'] = str(round(coords[0])), str(round(coords[1]))
+            if len(coords) > 2:
+                team['utcoffset'] = str(coords[2])
         colors, rgb = rgb_of(hex_colors)
         for n, (r, g, bl) in enumerate(rgb[:3], 1):
             team[f'teamcolor{n}r'], team[f'teamcolor{n}g'], team[f'teamcolor{n}b'] = str(r), str(g), str(bl)
@@ -111,7 +122,7 @@ class Clubs:
         self.next_formation += 1
         self.made.append({'source_id': source_id or f'club-{tid}', 'teamid': tid, 'name': name, 'existing': False,
                           'colors': colors, 'logo': logo, 'crest_text': None if logo else abbr,
-                          'kit_donor': donor, 'replaces': template_tid})
+                          'kit_donor': donor, 'replaces': template_tid if leave else None})
         return team
 
     def report(self, league_id=None):

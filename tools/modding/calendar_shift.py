@@ -9,13 +9,17 @@ Every date in the tables moves by YEARS, so everyone stays as old as the steps b
 - the Legends stay the age they were in the 2010s they stand for; the game's own players and referees no update
   had stay as the game had them;
 - contracts (a year), the day a player joined his club, the end of a loan move with them.
-COMPDATADIR (the competitions, compdata's text files, changed in place): every competition's first year
-(schedule_year_start: the root's is the year before Career's first season, 2017 in the game) moves by YEARS, so
-the tournaments every four years keep their years (2030's World Cup, as 2022's in 2018); a stadium's year
-(match_stadium_for_year) too. The match days stay as written for 2018 (schedule_year_real: the game moves them to
-the same weekday in the year played).
+COMPDATADIR (the mod's compdata: Career's settings go beside it): the competitions keep the game's years. Their
+fixtures are drawn for a season from its first year (schedule_year_start, the root's 2017: Career's first season
+2018) and their match days (day numbers, moved to the same weekday in the year played); with those years moved on
+too, the leagues whose season spans two years (England's, Germany's...: every one but the calendar year's, MLS's)
+were drawn no fixtures at all in 2026/27, and a Career started before 1 July (MLS's) faulted when their season
+began. Kept, the game simply plays its ninth season of them in 2026/27: YEARS must be a multiple of 4, so the
+tournaments every four years (2026's World Cup as 2018's) keep their years. The real fixture lists of 2018
+(compdata/schedules, schedule_year_real) are 2018's only, so 2026's are drawn from the clubs the leagues have.
 GAMEDIR (with COMPDATADIR): Career's own settings, written beside compdata (as the mod's): its calendar's first
-day (cmsettings.ini's CALSTART_YEAR, 2018 in the game: what Career's first day is, not the competitions), and the
+day (cmsettings.ini's CALSTART_YEAR, 2018 in the game: what Career's first day is, not the competitions; and its
+CALSTART_MONTH: July, for every league, below), and the
 stadiums of the tournaments every four years (internationals.txt: the game's run to 2030 and 2032, so later ones
 repeat them, each after the years its list covers).
 """
@@ -29,9 +33,6 @@ import league as fifa  # noqa: E402
 DATES = {'players': ['birthdate', 'playerjointeamdate'], 'playerloans': ['loandateend'], 'referee': ['birthdate'],
          'physio': ['birthdate'], 'trainingteamplayers': ['birthdate', 'playerjointeamdate']}
 YEARS = {'players': ['contractvaliduntil'], 'trainingteamplayers': ['contractvaliduntil']}
-COMP_YEARS = ('schedule_year_start', 'match_stadium_for_year')
-
-
 def moved(n, years):
     return str(fifa.days(fifa.shifted(fifa.from_days(n), -years)))
 
@@ -56,22 +57,6 @@ def tables(csvdir, years):
     return changed
 
 
-def compdata(folder, years):
-    path = os.path.join(folder, 'settings.txt')
-    with open(path, encoding='utf-8', newline='') as f:
-        lines = f.read().split('\n')
-    n = 0
-    for i, line in enumerate(lines):
-        parts = line.rstrip('\r').split(',')
-        if len(parts) == 3 and parts[1] in COMP_YEARS and parts[2].isdigit() and int(parts[2]) > 1900:
-            parts[2] = str(int(parts[2]) + years)
-            lines[i] = ','.join(parts) + ('\r' if line.endswith('\r') else '')
-            n += 1
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        f.write('\n'.join(lines))
-    return n
-
-
 def career(game, data, years):
     """cmsettings.ini and internationals.txt, from the game, into data (the mod's footballcompeng/data)."""
     import re
@@ -89,8 +74,12 @@ def career(game, data, years):
         out[name] = open(target, 'rb').read()
     ini, n = re.subn(rb'(CALSTART_YEAR\s*=\s*)(\d+)', lambda m: m.group(1) + str(int(m.group(2)) + years).encode(),
                      out['cmsettings.ini'])
-    if n != 1:
-        raise SystemExit('cmsettings.ini: no CALSTART_YEAR')
+    # Every Career from 1 July (the game's: 1 January, so a calendar year's league, MLS's, began in February): with
+    # the competitions in the game's years, a Career begun before July has no state for Europe's season then under
+    # way, and the game stopped itself (a fatal error) on 1 August, when those leagues played.
+    ini, m = re.subn(rb'(CALSTART_MONTH\s*=\s*)\d+', rb'\g<1>7', ini)
+    if n != 1 or m != 1:
+        raise SystemExit('cmsettings.ini: no CALSTART_YEAR or CALSTART_MONTH')
     open(os.path.join(data, 'cmsettings.ini'), 'wb').write(ini)
     text = out['internationals.txt']
     eol = b'\r\n' if b'\r\n' in text else b'\n'
@@ -117,10 +106,10 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     years = int(argv[1])
+    if years % 4:
+        raise SystemExit('YEARS: a multiple of 4 (the tournaments every four years keep their years)')
     changed = tables(argv[2], years)
     msg = f"calendar: {years} years on ({', '.join(changed)})"
-    if len(argv) > 3:
-        msg += f'; {compdata(argv[3], years)} competition years'
     if len(argv) > 4:
         msg += f'; Career from {2018 + years}, {career(argv[4], os.path.dirname(argv[3].rstrip("/")), years)} ' \
                'tournament stadiums more'

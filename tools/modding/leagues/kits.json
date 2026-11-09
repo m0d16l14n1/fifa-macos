@@ -1,0 +1,16 @@
+{
+  "comment": "PC mods (.fbmod, in tools/modding/sources, git-ignored) whose kits, crowd flags and banners fbkits.py makes into this game's files; later mods win. The RPL mod puts Russia's clubs in Ireland's, Norway's and Hacken's places (map: its id -> ours; skip: the places it took for clubs this update hasn't, Kairat, Sochi, Pari NN).",
+  "mods": [
+    {
+      "path": "sources/RPL-kit-stuff/FIFA 19 RPL BY SANEK48.fbmod",
+      "map": {
+        "305": 315, "838": 100765, "445": 100767, "837": 120000, "111285": 120001, "422": 120002, "753": 120003,
+        "306": 120004, "1757": 120006, "423": 120007, "1524": 120008, "112200": 120009, "1463": 120010, "563": 120011
+      },
+      "skip": [711, 112199, 113459, 422, 423, 445, 563, 753, 837, 838, 1463, 1524, 1757, 111285, 112200]
+    },
+    {
+      "path": "sources/kits-season-25-26/FIFA VLPATCH MOD - FULL KITPACK SEASION 2025_2026 FOR FIFA 19.fbmod"
+    }
+  ]
+}

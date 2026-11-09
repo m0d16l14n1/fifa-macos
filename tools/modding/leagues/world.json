@@ -1,9 +1,15 @@
 {
-  "comment": "The game's leagues and ESPN's codes for them, for the squads update (MOD3). ESPN has no squads for Poland (66), Ireland (65), Korea (83) or the German 3. Liga (2076): those come from the FC 27 dump (fc27.json). team_ids: ESPN's clubs whose names don't match the game's (LAFC, Basaksehir, Erzurum BB, Racing Club).",
+  "comment": "The game's leagues and ESPN's codes for them, for the squads update (MOD3). ESPN has no squads for Poland (66), Ireland (65), Korea (83) or the German 3. Liga (2076): those come from the FC 27 dump (fc27.json). team_ids: ESPN's clubs whose names don't match the game's (LAFC, Basaksehir, Erzurum BB, Racing Club). resize: the leagues whose competitions compdata.py fits to ESPN's club count (not Denmark: its split's playoffs need its 14). club_coords: new clubs' latitude, longitude and UTC offset where it matters (MLS's conferences go by longitude).",
   "today": "2026-11-08",
   "age_shift_years": 8,
   "first_player_id": 260000,
   "free_agents_team_id": 111592,
+  "resize": [39, 7, 353, 4, 189, 349, 350, 351, 32, 16, 17],
+  "club_coords": {
+    "St. Louis CITY SC": [38.6, -90.2, -6], "Charlotte FC": [35.2, -80.8, -5], "Austin FC": [30.4, -97.7, -6],
+    "Inter Miami CF": [26.2, -80.2, -5], "Nashville SC": [36.1, -86.8, -6], "San Diego FC": [32.7, -117.2, -8],
+    "FC Cincinnati": [39.1, -84.5, -5]
+  },
   "team_ids": {
     "esp.1": { "93": 448 },
     "ger.1": { "122": 31 },

@@ -144,9 +144,11 @@ def add_absent_clubs(builder, cfg, entries, unmatched):
             continue
         spare = [x['teamid'] for x in builder.t['leagueteamlinks']
                  if x['leagueid'] == lid and x['teamid'] not in listed and x['teamid'] not in builder.protected]
-        if not spare:
+        members = [x['teamid'] for x in builder.t['leagueteamlinks'] if x['leagueid'] == lid]
+        grow = not spare and len(members) < builder.capacity.get(lid, 0)
+        if not spare and not grow:
             continue
-        leaving = min(spare, key=lambda t: int(teams[t].get('overallrating') or 0))
+        leaving = min(spare or members, key=lambda t: int(teams[t].get('overallrating') or 0))
         t = item['source']
         roster_path = os.path.join(builder.espn, f"{item['league']}-roster-{t['id']}.json")
         roster = json.load(open(roster_path)).get('athletes', []) if os.path.exists(roster_path) else []
@@ -154,8 +156,10 @@ def add_absent_clubs(builder, cfg, entries, unmatched):
             continue  # not a squad to play with
         team = made.add(t['displayName'], t.get('shortDisplayName') or t['displayName'], t.get('abbreviation'),
                         [t.get('color') or '000000', t.get('alternateColor') or 'ffffff'], lid, leaving,
-                        logo=(t.get('logos') or [{}])[0].get('href'), source_id=f"{item['league']}-{t['id']}")
+                        logo=(t.get('logos') or [{}])[0].get('href'), source_id=f"{item['league']}-{t['id']}",
+                        leave=not grow, coords=cfg.get('club_coords', {}).get(t['displayName']))
         listed.add(team['teamid'])
+        teams[team['teamid']] = team
         out.append({'code': item['league'], 'league_id': lid, 'source': t, 'teamid': int(team['teamid']),
                     'team': team, 'roster': roster, 'score': 0.0, 'new': True})
         item['made'] = team['teamid']
@@ -261,27 +265,44 @@ def update_divisions(builder, cfg, entries):
     for e in entries:
         listed.setdefault(e['league_id'], []).append(str(e['teamid']))
     moves = []
+    builder.capacity = {}
+    import clubs
     for country in sorted({leagues[str(lid)]['countryid'] for lid in cfg['leagues']}):
         divisions = sorted((lid for lid, row in leagues.items() if row['countryid'] == country),
                            key=lambda lid: (int(leagues[lid]['level']), int(lid)))
         members = {lid: [x['teamid'] for x in links if x['leagueid'] == lid] for lid in divisions}
+        # A division's places: the game's; ESPN's count for those whose competitions compdata.py resizes
+        # (world.json's resize: MLS's 30 for 23).
+        places = {lid: len(members[lid]) for lid in divisions}
+        for lid in divisions:
+            if lid in map(str, cfg.get('resize', [])) and lid in cfg['leagues']:
+                places[lid] = len(json.load(open(os.path.join(builder.espn, cfg['leagues'][lid] + '-teams.json'))
+                                       )['sports'][0]['leagues'][0]['teams'])
+        builder.capacity.update(places)
         assigned = {}
         for lid in divisions:
             today = sorted(listed.get(lid, []), key=lambda t: t not in members[lid])  # the division's own first
-            for tid in [t for t in today if t not in assigned][:len(members[lid])]:
+            for tid in [t for t in today if t not in assigned][:places[lid]]:
                 assigned[tid] = lid
         pool = [t for lid in divisions for t in members[lid] if t not in assigned]
         for lid in divisions:
-            need = len(members[lid]) - sum(1 for v in assigned.values() if v == lid)
+            need = places[lid] - sum(1 for v in assigned.values() if v == lid)
             take = ([t for t in pool if t in members[lid]] + [t for t in pool if t not in members[lid]])[:need]
             for tid in take:
                 assigned[tid] = lid
                 pool.remove(tid)
         for x in links:
             new = assigned.get(x['teamid']) if x['leagueid'] in divisions else None
+            if new is None and x['leagueid'] in divisions:  # no place left (a division made smaller)
+                new = clubs.REST_OF_WORLD
+                builder.t['rowteamnationlinks'] = [r for r in builder.t['rowteamnationlinks']
+                                                   if r['teamid'] != x['teamid']]
+                builder.t['rowteamnationlinks'].append({'teamid': x['teamid'], 'nationid': country})
+                builder.changed.add('rowteamnationlinks')
             if new and new != x['leagueid']:
                 moves.append({'teamid': x['teamid'], 'name': builder.t_teams.get(x['teamid'], ''),
-                              'from': leagues[x['leagueid']]['leaguename'], 'to': leagues[new]['leaguename']})
+                              'from': leagues[x['leagueid']]['leaguename'],
+                              'to': leagues[new]['leaguename'] if new in leagues else 'Rest of World'})
                 x['prevleagueid'], x['leagueid'] = x['leagueid'], new
     return moves
 
@@ -473,8 +494,8 @@ def build(cfg, csvdir, espndir, outdir, pcsquads=None):
     for item in unmatched:
         item.pop('source', None)
     report = {'matched_teams': len(entries), 'unmatched_teams': [x for x in unmatched if not x.get('made')],
-              'new_clubs': [{'teamid': m['teamid'], 'name': m['name'], 'replaces': m['replaces']}
-                            for m in builder.clubs.made], 'left_for_rest_of_world': builder.clubs.left,
+              'new_clubs': [{'teamid': m['teamid'], 'name': m['name'], 'replaces': builder.t_teams.get(
+                  m['replaces']) if m['replaces'] else None} for m in builder.clubs.made], 'left_for_rest_of_world': builder.clubs.left,
               'division_moves': moves,
               'matched_players': builder.report['matched_players'],
               'new_players': builder.report['new_players'], 'teams': report_teams,
@@ -493,8 +514,8 @@ def main(argv):
     print(f"ESPN squads: {report['matched_teams']} clubs, {report['matched_players']} existing players, "
           f"{report['new_players']} new; {len(report['unmatched_teams'])} clubs left unchanged; "
           f"{len(report['division_moves'])} clubs promoted or relegated; {len(report['new_clubs'])} clubs made")
-    for left, new in zip(report['left_for_rest_of_world'], report['new_clubs']):
-        print(f"  new {new['name']:28} in {left['from']}, in the place of {left['name']} (to Rest of World)")
+    for new in report['new_clubs']:
+        print(f"  new {new['name']:28} " + (f"in the place of {new['replaces']}" if new['replaces'] else 'added'))
     for item in report['unmatched_teams']:
         print(f"  unmatched {item['league']:7} {item['name']:28} "
               f"({item['candidate'] or 'no candidate'}, {item['score']:.3f})")
