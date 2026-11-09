@@ -9,7 +9,12 @@ has it, opens it loose from the disc (d:\\data\\...). So a mod is a folder of lo
   own table of names, so the hash function needn't be known), and the game then finds the loose file;
 - strings/<language>.csv (columns stringid,text; eng_us, rus_ru, pol_pl, ara_sa) changes or adds the game's text
   (team, league and player names, menus): the mods' strings go into data/loc/<language>_upd.db, which the game
-  reads beside its own and takes first.
+  reads beside its own and takes first;
+- NAME.ini.patch (or any NAME.patch beside an INI-like file) changes only the keys it has: its [SECTION]s and
+  KEY = VALUE lines go into NAME as it is by then (an earlier mod's, else the game's, unpacked: unchunk), a key
+  the file hasn't added to its section. So mods that each change a few keys of one file (Career's cmsettings.ini:
+  the update's first day, a realism mod's settings) all go on, whatever their order; a whole NAME in a later
+  mod still replaces everything before it.
 
 The modded game is a folder of links: to the game's files and folders, to the mods' files, plus the rewritten .bh
 indexes. It takes no space to speak of and the game folder stays as it was.
@@ -67,19 +72,115 @@ def norm(name):
     return name.replace('\\', '/').lower().lstrip('/')
 
 
-def mod_files(mods):
-    """{normalized path: host file}, later mods winning."""
+def mod_files(mods, patches=None):
+    """{normalized path: host file}, later mods winning; patches (when given) gets {path: [NAME.patch files]},
+    in mod order, from the last mod with the whole file on."""
     files = {}
     for mod in mods:
         for root, _, names in os.walk(mod):
-            for name in names:
+            for name in sorted(names):
                 if name.startswith('.'):
                     continue
                 host = os.path.join(root, name)
                 path = norm(os.path.relpath(host, mod))
-                if not path.startswith('strings/'):
-                    files[path] = os.path.abspath(host)
+                if path.startswith('strings/'):
+                    continue
+                if path.endswith('.patch'):
+                    if patches is not None:
+                        patches.setdefault(path[:-len('.patch')], []).append(os.path.abspath(host))
+                    continue
+                files[path] = os.path.abspath(host)
+                if patches is not None:
+                    patches.pop(path, None)
     return files
+
+
+def ini_patch(text, patch):
+    """text (an INI: [SECTION]s, KEY = VALUE lines, // comments) with patch's keys set: a key the section has
+    gets the value (its comment kept), else it is added at the end of the section (a new section at the end)."""
+    eol = '\r\n' if '\r\n' in text else '\n'
+    lines = text.split(eol) if text else []
+
+    def key_of(line):
+        body = line.split('//')[0]
+        if '=' not in body or body.lstrip().startswith((';', '[')):
+            return None
+        return body.split('=', 1)[0].strip().upper()
+
+    wanted, section = {}, ''
+    for line in patch.replace('\r\n', '\n').split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            section = stripped[1:-1].strip().upper()
+        elif key_of(line):
+            k, v = line.split('//')[0].split('=', 1)
+            wanted.setdefault(section, {})[k.strip().upper()] = (k.strip(), v.strip())
+    done, section, ends = set(), '', {}
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            section = stripped[1:-1].strip().upper()
+            ends[section] = i + 1
+            continue
+        key = key_of(line)
+        if key is None:
+            continue
+        ends[section] = i + 1
+        if key in wanted.get(section, {}):
+            head, rest = line.split('=', 1)
+            comment = rest[rest.index('//'):] if '//' in rest else ''
+            lines[i] = f'{head.rstrip()} = {wanted[section][key][1]}' + (f' {comment}' if comment else '')
+            done.add((section, key))
+    added = {}
+    for sec, keys in wanted.items():
+        new = [f'{name} = {value}' for key, (name, value) in keys.items() if (sec, key) not in done]
+        if not new:
+            continue
+        if sec in ends or (sec == '' and not ends):
+            added.setdefault(ends.get(sec, 0), []).extend(new)
+        else:
+            added.setdefault(len(lines), []).extend(['', f'[{sec}]'] + new)
+    for at in sorted(added, reverse=True):
+        lines[at:at] = added[at]
+    return eol.join(lines)
+
+
+def unchunked(data):
+    """An archive entry's bytes: chunkzip/chunklzx entries through unchunk (beside this file in the app, else
+    out/tools/unchunk, built by tools/modding/build.sh)."""
+    if data[:8] not in (b'chunkzip', b'chunklzx'):
+        return data
+    import subprocess
+    import tempfile
+    here = os.path.dirname(os.path.abspath(__file__))
+    tool = next((t for t in (os.path.join(here, 'unchunk'), os.path.join(here, '..', '..', 'out', 'tools', 'unchunk'))
+                 if os.path.exists(t)), None)
+    if tool is None:
+        raise SystemExit('unchunk missing: sh tools/modding/build.sh')
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = os.path.join(tmp, 'in'), os.path.join(tmp, 'out')
+        open(src, 'wb').write(data)
+        subprocess.run([tool, src, dst], check=True, stdout=subprocess.DEVNULL)
+        return open(dst, 'rb').read()
+
+
+def game_file(game, path):
+    """The game's own file at path (normalized): loose, else an archive's entry (unpacked); None when neither."""
+    for root, dirs, names in os.walk(game):
+        for name in names:
+            host = os.path.join(root, name)
+            if norm(os.path.relpath(host, game)) == path:
+                return open(host, 'rb').read()
+    for root, _, names in os.walk(game):
+        for name in sorted(names):
+            if name.lower().endswith('.big'):
+                big = os.path.join(root, name)
+                for entry, offset, size in read_big(big):
+                    if norm(entry) == path:
+                        with open(big, 'rb') as f:
+                            f.seek(offset)
+                            return unchunked(f.read(size))
+    return None
 
 
 def mod_strings(mods):
@@ -144,10 +245,21 @@ def build(game, out, mods):
                 path = os.path.join(root, name)
                 os.unlink(path) if os.path.islink(path) else os.rmdir(path)
     os.makedirs(out, exist_ok=True)
-    files = mod_files(mods)
-    overrides = dict(files)
+    patches = {}
+    files = mod_files(mods, patches)
     generated = os.path.join(out, '.modgame')
     os.makedirs(generated, exist_ok=True)
+    for path, hosts in sorted(patches.items()):
+        base = open(files[path], 'rb').read() if path in files else game_file(game, path)
+        text = (base or b'').decode('utf-8', 'surrogateescape')
+        for host in hosts:
+            text = ini_patch(text, open(host, 'rb').read().decode('utf-8', 'surrogateescape'))
+        target = os.path.join(generated, 'patched', path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        open(target, 'wb').write(text.encode('utf-8', 'surrogateescape'))
+        files[path] = target
+        print(f'{path}: {len(hosts)} patch' + ('es' if len(hosts) > 1 else ''))
+    overrides = dict(files)
     for language, strings in sorted(mod_strings(mods).items()):
         name = f'{language}_upd'
         fifadb.language_db(os.path.join(generated, name + '.db'), strings)

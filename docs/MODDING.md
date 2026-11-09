@@ -122,6 +122,23 @@ All in `data/sceneassets` (RX3 files: models with their textures), named by id:
 `chunkzip` or `chunklzx` (EA's chunked deflate or Xbox LZX): `out/tools/unchunk`, built by
 `sh tools/modding/build.sh`, unpacks them. Loose files can be plain (the database is). RX3 editing is MOD2.
 
+### Settings mods (INI patches)
+
+A mod's `NAME.ini.patch` changes only the keys it has (`[SECTION]`, `KEY = VALUE`) of `NAME` as it is by then: an
+earlier mod's, else the game's, unpacked (`modgame.py`, with `unchunk`, which the app carries). Mods that tune the
+same settings file (Career's `cmsettings.ini`: the update's first day, a realism mod's balance) so all go on, in any
+order, each switched on or off on the launcher's Mods page. The update's Career start is such a patch.
+
+`tools/modding/inimod.py` makes one from a PC Frosty mod of Career's settings (the `footballcompeng/data` INI
+files, the same in both games with mostly the same keys): the keys the game has and the mod changes, never
+Career's first day; tables (`gpattributemodifiers.txt`, `ratingcurvetable.txt`) whole when they have the game's
+shape. Daniel's Career Mode Realism mod: `inimod.py "Daniel's FIFA 19 Career Mode Realism MOD.fbmod"
+out/mods/career-realism` (514 keys of 13 INI files, both tables), linked into the Mods folder as "Career Realism".
+
+Not so the PC's `locale.ini` gameplay tweaks: this game keeps `locale.ini` in `data/loc/locale.big`, which has no
+`.bh` index for a loose file to take its place, and of the keys such tweak files list about half aren't in the
+game at all (`MotorbikePhysics`, `LocoWarp_Avoid_*`...).
+
 ### PC kit mods
 
 The PC game's kit packs are Frosty mods (`.fbmod`): Frostbite textures, BC1 and BC7, Oodle-compressed.
@@ -358,6 +375,7 @@ Career's AI doesn't buy for them.
 | `tools/modding/fbkits.py` | PC kit mods (`leagues/kits.json`) to the game's kits, menu pictures, flags, banners |
 | `tools/modding/fbmod.py`, `fbtex.py` | Frosty mods: `list`, `info`, `extract`; their textures as images |
 | `tools/modding/rx3.py` | the game's RX3 textures: `list`, `png` |
+| `tools/modding/inimod.py` | a PC Frosty mod of Career's settings as INI patches (the launcher's Mods page) |
 | `tools/modding/build_ooz.sh` | `out/tools/ooz-x86`, the Oodle decoder `fbmod.py` uses |
 | `tools/modding/fifadb.py` | the database format: `info`, `export`, `import`, `check`; the locale's string hash and update files |
 | `tools/modding/unchunk.c` | chunkzip/chunklzx entries to plain bytes |

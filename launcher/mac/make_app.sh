@@ -24,6 +24,9 @@ for lib in "$sdk_lib"/librexgpu-*.dylib; do [ -e "$lib" ] && cp -fL "$lib" "$mac
 [ -d "$build/vulkan" ] && rm -rf "$macos/vulkan" && cp -RL "$build/vulkan" "$macos/vulkan"
 cp -f "$root/scripts/extract_god.py" "$resources/extract_god.py"
 cp -f "$root/tools/modding/modgame.py" "$root/tools/modding/fifadb.py" "$resources/"
+# unchunk: modgame.py unpacks the game's INI files with it to patch them (a mod's NAME.ini.patch).
+[ -x "$root/out/tools/unchunk" ] || sh "$root/tools/modding/build.sh"
+cp -f "$root/out/tools/unchunk" "$resources/unchunk"
 sh "$root/launcher/mac/build.sh" "$macos/FIFA 19 Launcher"
 
 version=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo dev)
