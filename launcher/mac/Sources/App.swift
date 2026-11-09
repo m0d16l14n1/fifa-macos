@@ -271,7 +271,8 @@ struct ModsPage: View {
             Text("A mod is a folder of the game's files, laid out as on the disc (data/db/fifa_ng_db.db, "
                  + "data/sceneassets/kit/...). A file the game has is replaced, a new one added; your game "
                  + "files stay as they are. Names and other text go in strings/eng_us.csv (stringid,text). Mods go on in "
-                 + "name order: where two change the same file or string, the later wins.")
+                 + "name order: where two change the same file or string, the later wins. A NAME.ini.patch changes "
+                 + "only the keys it has ([SECTION], KEY = VALUE), so mods tuning one settings file go on together.")
                 .foregroundStyle(.secondary)
             // No .fixedSize(horizontal: false, vertical: true) here: on macOS 27 it left the whole window blank
             // (sidebar too) and the launcher unusable. The text wraps without it.

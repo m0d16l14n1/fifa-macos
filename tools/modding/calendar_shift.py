@@ -18,8 +18,8 @@ began. Kept, the game simply plays its ninth season of them in 2026/27: YEARS mu
 tournaments every four years (2026's World Cup as 2018's) keep their years. The real fixture lists of 2018
 (compdata/schedules, schedule_year_real) are 2018's only, so 2026's are drawn from the clubs the leagues have.
 GAMEDIR (with COMPDATADIR): Career's own settings, written beside compdata (as the mod's): its calendar's first
-day (cmsettings.ini's CALSTART_YEAR, 2018 in the game: what Career's first day is, not the competitions; and its
-CALSTART_MONTH: July, for every league, below), and the
+day (cmsettings.ini.patch: CALSTART_YEAR, 2018 in the game, what Career's first day is, not the competitions; and
+CALSTART_MONTH, July for every league), and the
 stadiums of the tournaments every four years (internationals.txt: the game's run to 2030 and 2032, so later ones
 repeat them, each after the years its list covers).
 """
@@ -72,15 +72,17 @@ def career(game, data, years):
         subprocess.run([unchunk, target + '.stored', target], check=True, stdout=subprocess.DEVNULL)
         os.unlink(target + '.stored')
         out[name] = open(target, 'rb').read()
-    ini, n = re.subn(rb'(CALSTART_YEAR\s*=\s*)(\d+)', lambda m: m.group(1) + str(int(m.group(2)) + years).encode(),
-                     out['cmsettings.ini'])
-    # Every Career from 1 July (the game's: 1 January, so a calendar year's league, MLS's, began in February): with
-    # the competitions in the game's years, a Career begun before July has no state for Europe's season then under
-    # way, and the game stopped itself (a fatal error) on 1 August, when those leagues played.
-    ini, m = re.subn(rb'(CALSTART_MONTH\s*=\s*)\d+', rb'\g<1>7', ini)
-    if n != 1 or m != 1:
-        raise SystemExit('cmsettings.ini: no CALSTART_YEAR or CALSTART_MONTH')
-    open(os.path.join(data, 'cmsettings.ini'), 'wb').write(ini)
+    # Career's first day, as a patch of cmsettings.ini (modgame.py: only these keys, so a mod changing others of
+    # Career's settings goes on beside it). Every Career from 1 July (the game's: 1 January, so a calendar year's
+    # league, MLS's, began in February): with the competitions in the game's years, a Career begun before July has
+    # no state for Europe's season then under way, and the game stopped itself (a fatal error) on 1 August.
+    year = re.search(rb'CALSTART_YEAR\s*=\s*(\d+)', out['cmsettings.ini'])
+    if not year:
+        raise SystemExit('cmsettings.ini: no CALSTART_YEAR')
+    os.unlink(os.path.join(data, 'cmsettings.ini'))
+    open(os.path.join(data, 'cmsettings.ini.patch'), 'w', newline='\r\n').write(
+        '[DEFAULTS]\nCALSTART_DAY = 1\nCALSTART_MONTH = 7\n'
+        f'CALSTART_YEAR = {int(year.group(1)) + years}\n')
     text = out['internationals.txt']
     eol = b'\r\n' if b'\r\n' in text else b'\n'
     lines = text.split(eol)
